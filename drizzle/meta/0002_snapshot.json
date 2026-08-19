@@ -1,0 +1,911 @@
+{
+  "id": "3d79e253-5921-468e-b213-769c59bce741",
+  "prevId": "54c1168f-dbf8-425c-93b3-aa3294de00ac",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.aeronave_operadores": {
+      "name": "aeronave_operadores",
+      "schema": "",
+      "columns": {
+        "aeronave_marcas": {
+          "name": "aeronave_marcas",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "operador_id": {
+          "name": "operador_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_aeronave_op_operador": {
+          "name": "idx_aeronave_op_operador",
+          "columns": [
+            {
+              "expression": "operador_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "aeronave_operadores_aeronave_marcas_aeronaves_marcas_fk": {
+          "name": "aeronave_operadores_aeronave_marcas_aeronaves_marcas_fk",
+          "tableFrom": "aeronave_operadores",
+          "tableTo": "aeronaves",
+          "columnsFrom": [
+            "aeronave_marcas"
+          ],
+          "columnsTo": [
+            "marcas"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "aeronave_operadores_operador_id_operadores_id_fk": {
+          "name": "aeronave_operadores_operador_id_operadores_id_fk",
+          "tableFrom": "aeronave_operadores",
+          "tableTo": "operadores",
+          "columnsFrom": [
+            "operador_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "aeronave_operadores_aeronave_marcas_operador_id_pk": {
+          "name": "aeronave_operadores_aeronave_marcas_operador_id_pk",
+          "columns": [
+            "aeronave_marcas",
+            "operador_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.aeronave_proprietarios": {
+      "name": "aeronave_proprietarios",
+      "schema": "",
+      "columns": {
+        "aeronave_marcas": {
+          "name": "aeronave_marcas",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "proprietario_id": {
+          "name": "proprietario_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "percentual": {
+          "name": "percentual",
+          "type": "numeric(5, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_aeronave_prop_proprietario": {
+          "name": "idx_aeronave_prop_proprietario",
+          "columns": [
+            {
+              "expression": "proprietario_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "aeronave_proprietarios_aeronave_marcas_aeronaves_marcas_fk": {
+          "name": "aeronave_proprietarios_aeronave_marcas_aeronaves_marcas_fk",
+          "tableFrom": "aeronave_proprietarios",
+          "tableTo": "aeronaves",
+          "columnsFrom": [
+            "aeronave_marcas"
+          ],
+          "columnsTo": [
+            "marcas"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "aeronave_proprietarios_proprietario_id_proprietarios_id_fk": {
+          "name": "aeronave_proprietarios_proprietario_id_proprietarios_id_fk",
+          "tableFrom": "aeronave_proprietarios",
+          "tableTo": "proprietarios",
+          "columnsFrom": [
+            "proprietario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "aeronave_proprietarios_aeronave_marcas_proprietario_id_pk": {
+          "name": "aeronave_proprietarios_aeronave_marcas_proprietario_id_pk",
+          "columns": [
+            "aeronave_marcas",
+            "proprietario_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.aeronaves": {
+      "name": "aeronaves",
+      "schema": "",
+      "columns": {
+        "marcas": {
+          "name": "marcas",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "nr_cert_matricula": {
+          "name": "nr_cert_matricula",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nr_serie": {
+          "name": "nr_serie",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cd_tipo": {
+          "name": "cd_tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ds_modelo": {
+          "name": "ds_modelo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nm_fabricante": {
+          "name": "nm_fabricante",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cd_cls": {
+          "name": "cd_cls",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nr_pmd": {
+          "name": "nr_pmd",
+          "type": "numeric(8, 0)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cd_tipo_icao": {
+          "name": "cd_tipo_icao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nr_tripulacao_min": {
+          "name": "nr_tripulacao_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nr_passageiros_max": {
+          "name": "nr_passageiros_max",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nr_assentos": {
+          "name": "nr_assentos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nr_ano_fabricacao": {
+          "name": "nr_ano_fabricacao",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dt_validade_cva": {
+          "name": "dt_validade_cva",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dt_validade_ca": {
+          "name": "dt_validade_ca",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dt_canc": {
+          "name": "dt_canc",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ds_motivo_canc": {
+          "name": "ds_motivo_canc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cd_interdicao": {
+          "name": "cd_interdicao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ds_gravame": {
+          "name": "ds_gravame",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dt_matricula": {
+          "name": "dt_matricula",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tp_motor": {
+          "name": "tp_motor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "qt_motor": {
+          "name": "qt_motor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tp_pouso": {
+          "name": "tp_pouso",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tp_ca": {
+          "name": "tp_ca",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cd_proposito_cave": {
+          "name": "cd_proposito_cave",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cf_operacional": {
+          "name": "cf_operacional",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ds_categoria_homologacao": {
+          "name": "ds_categoria_homologacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tp_operacao": {
+          "name": "tp_operacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_aeronaves_modelo": {
+          "name": "idx_aeronaves_modelo",
+          "columns": [
+            {
+              "expression": "ds_modelo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_fabricante": {
+          "name": "idx_aeronaves_fabricante",
+          "columns": [
+            {
+              "expression": "nm_fabricante",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_cd_tipo": {
+          "name": "idx_aeronaves_cd_tipo",
+          "columns": [
+            {
+              "expression": "cd_tipo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_ano": {
+          "name": "idx_aeronaves_ano",
+          "columns": [
+            {
+              "expression": "nr_ano_fabricacao",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_situacao": {
+          "name": "idx_aeronaves_situacao",
+          "columns": [
+            {
+              "expression": "cd_interdicao",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_tp_motor": {
+          "name": "idx_aeronaves_tp_motor",
+          "columns": [
+            {
+              "expression": "tp_motor",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_qt_motor": {
+          "name": "idx_aeronaves_qt_motor",
+          "columns": [
+            {
+              "expression": "qt_motor",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_tp_pouso": {
+          "name": "idx_aeronaves_tp_pouso",
+          "columns": [
+            {
+              "expression": "tp_pouso",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_tp_ca": {
+          "name": "idx_aeronaves_tp_ca",
+          "columns": [
+            {
+              "expression": "tp_ca",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_cf_operacional": {
+          "name": "idx_aeronaves_cf_operacional",
+          "columns": [
+            {
+              "expression": "cf_operacional",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_categoria": {
+          "name": "idx_aeronaves_categoria",
+          "columns": [
+            {
+              "expression": "ds_categoria_homologacao",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_aeronaves_tp_operacao": {
+          "name": "idx_aeronaves_tp_operacao",
+          "columns": [
+            {
+              "expression": "tp_operacao",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.operadores": {
+      "name": "operadores",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "operadores_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "documento": {
+          "name": "documento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "uf": {
+          "name": "uf",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "operacao135": {
+          "name": "operacao135",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "transregular135": {
+          "name": "transregular135",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "autorizacaopmac135": {
+          "name": "autorizacaopmac135",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "operacao121": {
+          "name": "operacao121",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "transregular121": {
+          "name": "transregular121",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "autorizacaopmac121": {
+          "name": "autorizacaopmac121",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "sae": {
+          "name": "sae",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "authistrut": {
+          "name": "authistrut",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_operadores_nome": {
+          "name": "idx_operadores_nome",
+          "columns": [
+            {
+              "expression": "nome",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_operadores_uf": {
+          "name": "idx_operadores_uf",
+          "columns": [
+            {
+              "expression": "uf",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "operadores_documento_unique": {
+          "name": "operadores_documento_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "documento"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.proprietarios": {
+      "name": "proprietarios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "proprietarios_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "documento": {
+          "name": "documento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "uf": {
+          "name": "uf",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_proprietarios_nome": {
+          "name": "idx_proprietarios_nome",
+          "columns": [
+            {
+              "expression": "nome",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_proprietarios_uf": {
+          "name": "idx_proprietarios_uf",
+          "columns": [
+            {
+              "expression": "uf",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "proprietarios_documento_unique": {
+          "name": "proprietarios_documento_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "documento"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.usuarios": {
+      "name": "usuarios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "usuarios_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "login": {
+          "name": "login",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "senha_hash": {
+          "name": "senha_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_usuarios_login": {
+          "name": "idx_usuarios_login",
+          "columns": [
+            {
+              "expression": "login",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "usuarios_login_unique": {
+          "name": "usuarios_login_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "login"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
