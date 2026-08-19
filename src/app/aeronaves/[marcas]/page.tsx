@@ -88,7 +88,7 @@ export default async function DetalheAeronavePage({
             aria-hidden
           />
           <div className="flex items-center gap-3">
-            <h1 className="font-display text-4xl font-bold italic tracking-wide">
+            <h1 className="font-mono text-4xl font-bold tracking-wider">
               {aeronave.marcas}
             </h1>
             <Badge className="border-white/30 bg-white/15 text-white">

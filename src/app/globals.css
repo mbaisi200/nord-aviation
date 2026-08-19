@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@variant dark (&:is(.dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -14,10 +16,15 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.light) {
     --background: #0a0a0a;
     --foreground: #ededed;
   }
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 body {
@@ -41,14 +48,12 @@ body {
   background-size: 24px 24px, auto, auto, auto, auto, auto;
 }
 
-@media (prefers-color-scheme: dark) {
-  .fundo-gradiente {
-    background:
-      radial-gradient(rgba(56, 189, 248, 0.1) 1px, transparent 1.5px),
-      radial-gradient(900px 520px at 8% -6%, rgba(14, 165, 233, 0.3), transparent 60%),
-      radial-gradient(1000px 560px at 92% -2%, rgba(99, 102, 241, 0.26), transparent 55%),
-      radial-gradient(1100px 640px at 50% 118%, rgba(34, 211, 238, 0.2), transparent 60%),
-      linear-gradient(165deg, #0c1624 0%, #0a0a0a 45%, #111329 100%);
-    background-size: 24px 24px, auto, auto, auto, auto;
-  }
+.dark .fundo-gradiente {
+  background:
+    radial-gradient(rgba(56, 189, 248, 0.1) 1px, transparent 1.5px),
+    radial-gradient(900px 520px at 8% -6%, rgba(14, 165, 233, 0.3), transparent 60%),
+    radial-gradient(1000px 560px at 92% -2%, rgba(99, 102, 241, 0.26), transparent 55%),
+    radial-gradient(1100px 640px at 50% 118%, rgba(34, 211, 238, 0.2), transparent 60%),
+    linear-gradient(165deg, #0c1624 0%, #0a0a0a 45%, #111329 100%);
+  background-size: 24px 24px, auto, auto, auto, auto;
 }

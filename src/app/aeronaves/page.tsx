@@ -132,7 +132,7 @@ export default async function ListaAeronavesPage({
                 <Card className="flex flex-col gap-2 p-4 transition-colors hover:border-sky-400">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2.5">
-                      <span className="bg-gradient-to-r from-sky-600 to-indigo-600 bg-clip-text font-display text-lg font-extrabold tracking-wide text-transparent dark:from-sky-400 dark:to-indigo-400">
+                      <span className="font-mono text-lg font-bold tracking-wider text-zinc-900 dark:text-zinc-100">
                         {a.marcas}
                       </span>
                       <Badge className={situacaoCor(a.cdInterdicao)}>
@@ -144,7 +144,7 @@ export default async function ListaAeronavesPage({
                     </span>
                   </div>
                   <div className="text-sm text-zinc-600 dark:text-zinc-400">
-                    <span className="font-display font-semibold">{a.dsModelo ?? "Modelo não informado"}</span>
+                    <span className="font-medium">{a.dsModelo ?? "Modelo não informado"}</span>
                     {a.nmFabricante ? (
                       <span> · {a.nmFabricante}</span>
                     ) : null}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Plane, Plus, Search } from "lucide-react";
 import { obterSessao } from "@/lib/auth";
 import { MenuUsuario } from "@/components/menu-usuario";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const sessao = await obterSessao();
@@ -26,7 +27,10 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               <Plus className="h-4 w-4" />
               <span className="hidden sm:inline">Nova aeronave</span>
             </Link>
+            <div className="flex items-center gap-1">
+            <ThemeToggle />
             {sessao ? <MenuUsuario nome={sessao.nome} /> : null}
+          </div>
           </div>
         </div>
       </header>
