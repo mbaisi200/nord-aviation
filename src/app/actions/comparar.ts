@@ -114,6 +114,12 @@ export type DiferencaAeronave = {
   operadores: DiferencaOperadores;
 };
 
+export type EstatisticasComparacao = {
+  camposMaisAlterados: { rotulo: string; quantidade: number }[];
+  novosPorFabricante: { fabricante: string; quantidade: number }[];
+  removidosPorFabricante: { fabricante: string; quantidade: number }[];
+};
+
 export type ResultadoComparacao = {
   base: string;
   alvo: string;
@@ -123,6 +129,7 @@ export type ResultadoComparacao = {
     alterados: number;
     semAlteracao: number;
   };
+  estatisticas: EstatisticasComparacao;
   novos: string[];
   removidos: string[];
   alterados: DiferencaAeronave[];
@@ -165,6 +172,206 @@ function compararVinculos(
   return { adicionados, removidos, alterados };
 }
 
+export type ResultadoComparacaoMatricula = {
+  marcas: string;
+  base: string;
+  alvo: string;
+  existeBase: boolean;
+  existeAlvo: boolean;
+  campos: { rotulo: string; antes: string; depois: string; mudou: boolean }[];
+  proprietarios: { antes: string; depois: string; mudou: boolean };
+  operadores: { antes: string; depois: string; mudou: boolean };
+};
+
+export async function compararMatricula(
+  marcas: string,
+  base: string,
+  alvo: string,
+): Promise<ResultadoComparacaoMatricula> {
+  await exigirSessao();
+  if (!/^\d{4}-\d{2}$/.test(base) || !/^\d{4}-\d{2}$/.test(alvo)) {
+    throw new Error("Períodos inválidos");
+  }
+  const m = (marcas ?? "").trim().toUpperCase();
+  if (!/^[A-Z0-9-]+$/.test(m)) {
+    throw new Error("Matrícula inválida");
+  }
+
+  const [aBase, aAlvo, vpBase, vpAlvo, voBase, voAlvo] = await Promise.all([
+    db
+      .select()
+      .from(aeronaves)
+      .where(and(eq(aeronaves.marcas, m), eq(aeronaves.periodo, base)))
+      .limit(1),
+    db
+      .select()
+      .from(aeronaves)
+      .where(and(eq(aeronaves.marcas, m), eq(aeronaves.periodo, alvo)))
+      .limit(1),
+    db
+      .select()
+      .from(aeronaveProprietarios)
+      .where(
+        and(
+          eq(aeronaveProprietarios.aeronaveMarcas, m),
+          eq(aeronaveProprietarios.periodo, base),
+        ),
+      ),
+    db
+      .select()
+      .from(aeronaveProprietarios)
+      .where(
+        and(
+          eq(aeronaveProprietarios.aeronaveMarcas, m),
+          eq(aeronaveProprietarios.periodo, alvo),
+        ),
+      ),
+    db
+      .select()
+      .from(aeronaveOperadores)
+      .where(
+        and(
+          eq(aeronaveOperadores.aeronaveMarcas, m),
+          eq(aeronaveOperadores.periodo, base),
+        ),
+      ),
+    db
+      .select()
+      .from(aeronaveOperadores)
+      .where(
+        and(
+          eq(aeronaveOperadores.aeronaveMarcas, m),
+          eq(aeronaveOperadores.periodo, alvo),
+        ),
+      ),
+  ]);
+
+  const docs = new Set<string>();
+  for (const p of [...vpBase, ...vpAlvo]) docs.add(p.proprietarioDocumento);
+  for (const o of [...voBase, ...voAlvo]) docs.add(o.operadorDocumento);
+  const docsArr = [...docs];
+
+  const [propBase, propAlvo, opBase, opAlvo] =
+    docsArr.length > 0
+      ? await Promise.all([
+          db
+            .select()
+            .from(proprietarios)
+            .where(and(inArray(proprietarios.documento, docsArr), eq(proprietarios.periodo, base))),
+          db
+            .select()
+            .from(proprietarios)
+            .where(and(inArray(proprietarios.documento, docsArr), eq(proprietarios.periodo, alvo))),
+          db
+            .select()
+            .from(operadores)
+            .where(and(inArray(operadores.documento, docsArr), eq(operadores.periodo, base))),
+          db
+            .select()
+            .from(operadores)
+            .where(and(inArray(operadores.documento, docsArr), eq(operadores.periodo, alvo))),
+        ])
+      : [[], [], [], []];
+
+  type LinhaEntidade = { documento: string; nome: string; uf: string | null };
+  const nomeProp = (rows: LinhaEntidade[], doc: string) => {
+    const r = rows.find((x) => x.documento === doc);
+    return r ? { nome: r.nome, uf: r.uf } : { nome: doc, uf: null };
+  };
+  const nomeOp = (rows: LinhaEntidade[], doc: string) => {
+    const r = rows.find((x) => x.documento === doc);
+    return r ? { nome: r.nome, uf: r.uf } : { nome: doc, uf: null };
+  };
+
+  const montarLista = (
+    itens: { doc: string; percentual?: string | null }[],
+    nomes: (rows: LinhaEntidade[], doc: string) => { nome: string; uf: string | null },
+    periodos: LinhaEntidade[],
+  ) =>
+    itens
+      .map((v) => {
+        const info = nomes(periodos, v.doc);
+        return {
+          documento: v.doc,
+          nome: info.nome,
+          uf: info.uf,
+          percentual: v.percentual ?? null,
+        };
+      })
+      .sort((x, y) => x.documento.localeCompare(y.documento))
+      .map((e) => descricaoVinculo(e))
+      .join("; ") || "—";
+
+  const proprietariosAntes = montarLista(
+    vpBase.map((v) => ({ doc: v.proprietarioDocumento, percentual: v.percentual })),
+    nomeProp,
+    propBase,
+  );
+  const proprietariosDepois = montarLista(
+    vpAlvo.map((v) => ({ doc: v.proprietarioDocumento, percentual: v.percentual })),
+    nomeProp,
+    propAlvo,
+  );
+  const operadoresAntes = montarLista(
+    voBase.map((v) => ({ doc: v.operadorDocumento })),
+    nomeOp,
+    opBase,
+  );
+  const operadoresDepois = montarLista(
+    voAlvo.map((v) => ({ doc: v.operadorDocumento })),
+    nomeOp,
+    opAlvo,
+  );
+
+  const campos: ResultadoComparacaoMatricula["campos"] = [];
+  if (aBase[0] && aAlvo[0]) {
+    const a = aBase[0];
+    const b = aAlvo[0];
+    for (const c of CAMPOS) {
+      const chave = c.prop as keyof typeof a;
+      const vBase = normalizar(a[chave], c.tipo);
+      const vAlvo = normalizar(b[chave], c.tipo);
+      campos.push({
+        rotulo: c.rotulo,
+        antes: exibir(a[chave], c.tipo),
+        depois: exibir(b[chave], c.tipo),
+        mudou: vBase !== vAlvo,
+      });
+    }
+  }
+  campos.push({
+    rotulo: "Proprietários",
+    antes: proprietariosAntes,
+    depois: proprietariosDepois,
+    mudou: proprietariosAntes !== proprietariosDepois,
+  });
+  campos.push({
+    rotulo: "Operadores",
+    antes: operadoresAntes,
+    depois: operadoresDepois,
+    mudou: operadoresAntes !== operadoresDepois,
+  });
+
+  return {
+    marcas: m,
+    base,
+    alvo,
+    existeBase: aBase.length > 0,
+    existeAlvo: aAlvo.length > 0,
+    campos,
+    proprietarios: {
+      antes: proprietariosAntes,
+      depois: proprietariosDepois,
+      mudou: proprietariosAntes !== proprietariosDepois,
+    },
+    operadores: {
+      antes: operadoresAntes,
+      depois: operadoresDepois,
+      mudou: operadoresAntes !== operadoresDepois,
+    },
+  };
+}
+
 export async function compararPeriodos(
   base: string,
   alvo: string,
@@ -190,6 +397,11 @@ export async function compararPeriodos(
         alterados: 0,
         semAlteracao: r?.t ?? 0,
       },
+      estatisticas: {
+        camposMaisAlterados: [],
+        novosPorFabricante: [],
+        removidosPorFabricante: [],
+      },
       novos: [],
       removidos: [],
       alterados: [],
@@ -198,7 +410,8 @@ export async function compararPeriodos(
     };
   }
 
-  const res = await db.execute(sql`
+  const [res, resFab] = await Promise.all([
+    db.execute(sql`
     WITH base AS (
       SELECT marcas, md5(CAST(json_build_array(${sql.raw(LISTA_CAMPOS_SQL)}) AS text)) AS h
       FROM aeronaves WHERE periodo = ${base}
@@ -215,7 +428,22 @@ export async function compararPeriodos(
     WHERE base.h IS DISTINCT FROM alvo.h
        OR base.marcas IS NULL
        OR alvo.marcas IS NULL
-  `);
+  `),
+    db.execute(sql`
+    WITH base AS (
+      SELECT marcas, nm_fabricante FROM aeronaves WHERE periodo = ${base}
+    ), alvo AS (
+      SELECT marcas, nm_fabricante FROM aeronaves WHERE periodo = ${alvo}
+    )
+    SELECT CASE WHEN base.marcas IS NULL THEN 'novo' ELSE 'removido' END AS tipo,
+           COALESCE(NULLIF(TRIM(alvo.nm_fabricante), ''), NULLIF(TRIM(base.nm_fabricante), ''), 'Não informado') AS fabricante,
+           count(*)::int AS n
+    FROM base FULL JOIN alvo USING (marcas)
+    WHERE base.marcas IS NULL OR alvo.marcas IS NULL
+    GROUP BY 1, 2
+    ORDER BY n DESC
+  `),
+  ]);
 
   const novos: string[] = [];
   const removidos: string[] = [];
@@ -424,6 +652,26 @@ export async function compararPeriodos(
   const paginas = Math.max(1, Math.ceil(total / porPagina));
   const fatia = alterados.slice((pagina - 1) * porPagina, pagina * porPagina);
 
+  const contagemCampos = new Map<string, number>();
+  for (const a of alterados) {
+    for (const c of a.campos) {
+      contagemCampos.set(c.campo, (contagemCampos.get(c.campo) ?? 0) + 1);
+    }
+  }
+  const camposMaisAlterados = [...contagemCampos.entries()]
+    .map(([rotulo, quantidade]) => ({ rotulo, quantidade }))
+    .sort((x, y) => y.quantidade - x.quantidade)
+    .slice(0, 8);
+
+  const novosPorFabricante = resFab.rows
+    .filter((r) => r.tipo === "novo")
+    .slice(0, 6)
+    .map((r) => ({ fabricante: r.fabricante as string, quantidade: r.n as number }));
+  const removidosPorFabricante = resFab.rows
+    .filter((r) => r.tipo === "removido")
+    .slice(0, 6)
+    .map((r) => ({ fabricante: r.fabricante as string, quantidade: r.n as number }));
+
   return {
     base,
     alvo,
@@ -432,6 +680,11 @@ export async function compararPeriodos(
       removidos: removidos.length,
       alterados: total,
       semAlteracao: totalBase - removidos.length - total,
+    },
+    estatisticas: {
+      camposMaisAlterados,
+      novosPorFabricante,
+      removidosPorFabricante,
     },
     novos,
     removidos,

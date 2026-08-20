@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   CheckCircle2,
   Download,
@@ -169,6 +170,17 @@ export function ImportadorRab({ periodos }: { periodos: string[] }) {
               className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
           </div>
+
+          {periodos.includes(periodo) && status !== "concluido" ? (
+            <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                O período <strong>{formatarPeriodo(periodo)}</strong> já existe
+                na base e será <strong>substituído</strong> pelos dados deste
+                arquivo.
+              </span>
+            </div>
+          ) : null}
 
           {erro ? (
             <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
