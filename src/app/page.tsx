@@ -1,18 +1,23 @@
 import Link from "next/link";
-import { Plane, Search, Plus, Database, ArrowRight } from "lucide-react";
+import { GitCompare, Plane, Search, Plus, Database, ArrowRight } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Card } from "@/components/ui";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { aeronaves } from "@/db/schema";
+import { periodoAtual } from "@/lib/periodo";
 
 export default async function Home() {
   let total: number | null = null;
   try {
-    const [r] = await db
-      .select({ total: sql<number>`count(*)::int` })
-      .from(aeronaves);
-    total = r?.total ?? null;
+    const pAtual = await periodoAtual();
+    if (pAtual) {
+      const [r] = await db
+        .select({ total: sql<number>`count(*)::int` })
+        .from(aeronaves)
+        .where(sql`${aeronaves.periodo} = ${pAtual}`);
+      total = r?.total ?? null;
+    }
   } catch {
     total = null;
   }
@@ -86,6 +91,21 @@ export default async function Home() {
                 <p className="font-semibold">Consultar aeronaves</p>
                 <p className="text-sm text-zinc-500">
                   Busque por prefixo, modelo, fabricante ou série
+                </p>
+              </div>
+              <ArrowRight className="h-4 w-4 text-zinc-400" />
+            </Card>
+          </Link>
+          <Link href="/comparar">
+            <Card className="flex items-center gap-3 p-4 transition-all hover:-translate-y-0.5 hover:border-sky-400 hover:shadow-lg">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-md shadow-sky-600/25">
+                <GitCompare className="h-5 w-5" />
+              </span>
+              <div className="flex-1">
+                <p className="font-semibold">Comparar períodos do RAB</p>
+                <p className="text-sm text-zinc-500">
+                  Veja o que mudou entre dois meses: novos, removidos e
+                  alterados
                 </p>
               </div>
               <ArrowRight className="h-4 w-4 text-zinc-400" />

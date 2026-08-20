@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plane, Plus, Search } from "lucide-react";
+import { GitCompare, Plane, Plus, Search } from "lucide-react";
 import { obterSessao } from "@/lib/auth";
 import { MenuUsuario } from "@/components/menu-usuario";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -20,6 +20,13 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             </span>
           </Link>
           <div className="flex items-center gap-2">
+            <Link
+              href="/comparar"
+              className="hidden h-9 items-center gap-1.5 rounded-full border border-zinc-300 px-3 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 sm:inline-flex dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <GitCompare className="h-4 w-4" />
+              Comparar
+            </Link>
             <Link
               href="/aeronaves/novo"
               className="inline-flex h-9 items-center gap-1.5 rounded-full bg-gradient-to-r from-sky-600 to-indigo-600 px-3.5 text-sm font-medium text-white shadow-md shadow-sky-600/25 transition-all hover:from-sky-700 hover:to-indigo-700 hover:shadow-lg hover:shadow-sky-600/30"
@@ -59,6 +66,13 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
               <Plus className="h-5 w-5" />
             </span>
             Cadastrar
+          </Link>
+          <Link
+            href="/comparar"
+            className="flex flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-zinc-500 active:bg-zinc-100 dark:text-zinc-400 dark:active:bg-zinc-900"
+          >
+            <GitCompare className="h-5 w-5" />
+            Comparar
           </Link>
         </div>
       </nav>

@@ -5,7 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { ReadableStream } from "node:stream/web";
 import { parse } from "csv-parse";
-import { inArray, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "../src/db";
 import {
   aeronaveOperadores,
@@ -19,6 +19,20 @@ const CSV_URL =
   "https://www.gov.br/anac/pt-br/acesso-a-informacao/dados-abertos/areas-de-atuacao/aeronaves-1/registro-aeronautico-brasileiro/aeronaves-registradas-no-registro-aeronautico-brasileiro-csv";
 const CSV_PATH = process.env.RAB_CSV_PATH ?? "data/aeronaves_rab.csv";
 const BATCH = 500;
+
+function argPeriodo(): string {
+  const i = process.argv.indexOf("--periodo");
+  if (i !== -1 && process.argv[i + 1]) {
+    const p = process.argv[i + 1];
+    if (!/^\d{4}-\d{2}$/.test(p)) {
+      throw new Error("Período inválido. Use --periodo YYYY-MM (ex.: 2026-08)");
+    }
+    return p;
+  }
+  const agora = new Date();
+  const mes = String(agora.getMonth() + 1).padStart(2, "0");
+  return `${agora.getFullYear()}-${mes}`;
+}
 
 function parseJsonField(value: string): Record<string, string>[] {
   if (!value) return [];
@@ -161,15 +175,16 @@ async function lerLinhas(): Promise<LinhaCsv[]> {
   return linhas;
 }
 
-async function upsertProprietarios(linhas: LinhaCsv[]) {
+async function upsertProprietarios(linhas: LinhaCsv[], periodo: string) {
   const mapa = new Map<string, typeof proprietarios.$inferInsert>();
   for (const l of linhas) {
     for (const p of parseJsonField(l.PROPRIETARIOS)) {
       const documento = (p.DOCUMENTO ?? "").trim();
       if (!documento) continue;
       mapa.set(documento, {
-        nome: (p.NOME ?? "").trim(),
         documento,
+        periodo,
+        nome: (p.NOME ?? "").trim(),
         uf: (p.UF ?? "").trim() || null,
       });
     }
@@ -181,28 +196,23 @@ async function upsertProprietarios(linhas: LinhaCsv[]) {
       .insert(proprietarios)
       .values(lote)
       .onConflictDoUpdate({
-        target: proprietarios.documento,
+        target: [proprietarios.documento, proprietarios.periodo],
         set: { nome: sql`excluded.nome`, uf: sql`excluded.uf`, updatedAt: new Date() },
       });
   }
-  const ids = await db
-    .select({ id: proprietarios.id, documento: proprietarios.documento })
-    .from(proprietarios)
-    .where(inArray(proprietarios.documento, todos.map((p) => p.documento)));
-  const porDocumento = new Map(ids.map((r) => [r.documento, r.id]));
-  console.log(`Proprietários: ${ids.length} registros`);
-  return porDocumento;
+  console.log(`Proprietários: ${todos.length} registros`);
 }
 
-async function upsertOperadores(linhas: LinhaCsv[]) {
+async function upsertOperadores(linhas: LinhaCsv[], periodo: string) {
   const mapa = new Map<string, typeof operadores.$inferInsert>();
   for (const l of linhas) {
     for (const o of parseJsonField(l.OPERADORES)) {
       const documento = (o.DOCUMENTO ?? "").trim();
       if (!documento) continue;
       mapa.set(documento, {
-        nome: (o.NOME ?? "").trim(),
         documento,
+        periodo,
+        nome: (o.NOME ?? "").trim(),
         uf: (o.UF ?? "").trim() || null,
         operacao135: toBool(o.OPERACAO135),
         transregular135: toBool(o.TRANSPREGULAR135),
@@ -222,7 +232,7 @@ async function upsertOperadores(linhas: LinhaCsv[]) {
       .insert(operadores)
       .values(lote)
       .onConflictDoUpdate({
-        target: operadores.documento,
+        target: [operadores.documento, operadores.periodo],
         set: {
           nome: sql`excluded.nome`,
           uf: sql`excluded.uf`,
@@ -238,18 +248,13 @@ async function upsertOperadores(linhas: LinhaCsv[]) {
         },
       });
   }
-  const ids = await db
-    .select({ id: operadores.id, documento: operadores.documento })
-    .from(operadores)
-    .where(inArray(operadores.documento, todos.map((o) => o.documento)));
-  const porDocumento = new Map(ids.map((r) => [r.documento, r.id]));
-  console.log(`Operadores: ${ids.length} registros`);
-  return porDocumento;
+  console.log(`Operadores: ${todos.length} registros`);
 }
 
-async function upsertAeronaves(linhas: LinhaCsv[]) {
+async function upsertAeronaves(linhas: LinhaCsv[], periodo: string) {
   const registros = linhas.map((l) => ({
     marcas: (l.MARCAS ?? "").trim(),
+    periodo,
     nrCertMatricula: toInt(l.NR_CERT_MATRICULA),
     nrSerie: l.NR_SERIE?.trim() || null,
     cdTipo: l.CD_TIPO?.trim() || null,
@@ -278,13 +283,14 @@ async function upsertAeronaves(linhas: LinhaCsv[]) {
     dsCategoriaHomologacao: l.DS_CATEGORIA_HOMOLOGACAO?.trim() || null,
     tpOperacao: l.TP_OPERACAO?.trim() || null,
   }));
+  await db.delete(aeronaves).where(sql`${aeronaves.periodo} = ${periodo}`);
   for (let i = 0; i < registros.length; i += BATCH) {
     const lote = registros.slice(i, i + BATCH);
     await db
       .insert(aeronaves)
       .values(lote)
       .onConflictDoUpdate({
-        target: aeronaves.marcas,
+        target: [aeronaves.marcas, aeronaves.periodo],
         set: {
           nrCertMatricula: sql`excluded.nr_cert_matricula`,
           nrSerie: sql`excluded.nr_serie`,
@@ -320,34 +326,39 @@ async function upsertAeronaves(linhas: LinhaCsv[]) {
   console.log(`Aeronaves: ${registros.length} registros`);
 }
 
-async function upsertVinculos(
-  linhas: LinhaCsv[],
-  propIds: Map<string, number>,
-  opIds: Map<string, number>,
-) {
+async function upsertVinculos(linhas: LinhaCsv[], periodo: string) {
   const vinculosProp: (typeof aeronaveProprietarios.$inferInsert)[] = [];
   const vinculosOp: (typeof aeronaveOperadores.$inferInsert)[] = [];
   for (const l of linhas) {
     const marcas = (l.MARCAS ?? "").trim();
     for (const p of parseJsonField(l.PROPRIETARIOS)) {
-      const id = propIds.get((p.DOCUMENTO ?? "").trim());
-      if (id) {
+      const documento = (p.DOCUMENTO ?? "").trim();
+      if (documento) {
         vinculosProp.push({
           aeronaveMarcas: marcas,
-          proprietarioId: id,
+          periodo,
+          proprietarioDocumento: documento,
           percentual: toPmd(p.PERCENTUAL),
         });
       }
     }
     for (const o of parseJsonField(l.OPERADORES)) {
-      const id = opIds.get((o.DOCUMENTO ?? "").trim());
-      if (id) {
-        vinculosOp.push({ aeronaveMarcas: marcas, operadorId: id });
+      const documento = (o.DOCUMENTO ?? "").trim();
+      if (documento) {
+        vinculosOp.push({
+          aeronaveMarcas: marcas,
+          periodo,
+          operadorDocumento: documento,
+        });
       }
     }
   }
-  await db.delete(aeronaveProprietarios);
-  await db.delete(aeronaveOperadores);
+  await db
+    .delete(aeronaveProprietarios)
+    .where(sql`${aeronaveProprietarios.periodo} = ${periodo}`);
+  await db
+    .delete(aeronaveOperadores)
+    .where(sql`${aeronaveOperadores.periodo} = ${periodo}`);
   for (let i = 0; i < vinculosProp.length; i += BATCH) {
     await db
       .insert(aeronaveProprietarios)
@@ -370,13 +381,14 @@ async function main() {
   if (modo === "baixar" || !existsSync(CSV_PATH)) {
     await downloadCsv();
   }
+  const periodo = argPeriodo();
   const linhas = await lerLinhas();
   if (linhas.length === 0) throw new Error("CSV vazio");
-  const propIds = await upsertProprietarios(linhas);
-  const opIds = await upsertOperadores(linhas);
-  await upsertAeronaves(linhas);
-  await upsertVinculos(linhas, propIds, opIds);
-  console.log("Importação concluída com sucesso!");
+  await upsertProprietarios(linhas, periodo);
+  await upsertOperadores(linhas, periodo);
+  await upsertAeronaves(linhas, periodo);
+  await upsertVinculos(linhas, periodo);
+  console.log(`Importação do período ${periodo} concluída com sucesso!`);
 }
 
 main().catch((err) => {

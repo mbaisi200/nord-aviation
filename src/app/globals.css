@@ -57,3 +57,20 @@ body {
     linear-gradient(165deg, #0c1624 0%, #0a0a0a 45%, #111329 100%);
   background-size: 24px 24px, auto, auto, auto, auto;
 }
+
+@media print {
+  header,
+  nav,
+  .fundo-gradiente {
+    display: none !important;
+  }
+  body {
+    background: #ffffff !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .print\:hidden {
+    display: none !important;
+  }
+}

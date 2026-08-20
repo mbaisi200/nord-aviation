@@ -9,10 +9,13 @@ import {
   timestamp,
 } from "drizzle-orm/pg-core";
 
+export const PERIODO_MANUAL = "MANUAL";
+
 export const aeronaves = pgTable(
   "aeronaves",
   {
-    marcas: text("marcas").primaryKey(),
+    marcas: text("marcas").notNull(),
+    periodo: text("periodo").notNull(),
     nrCertMatricula: integer("nr_cert_matricula"),
     nrSerie: text("nr_serie"),
     cdTipo: text("cd_tipo"),
@@ -44,6 +47,8 @@ export const aeronaves = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
+    primaryKey({ columns: [t.marcas, t.periodo] }),
+    index("idx_aeronaves_periodo").on(t.periodo),
     index("idx_aeronaves_modelo").on(t.dsModelo),
     index("idx_aeronaves_fabricante").on(t.nmFabricante),
     index("idx_aeronaves_cd_tipo").on(t.cdTipo),
@@ -62,14 +67,15 @@ export const aeronaves = pgTable(
 export const proprietarios = pgTable(
   "proprietarios",
   {
-    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    documento: text("documento").notNull(),
+    periodo: text("periodo").notNull(),
     nome: text("nome").notNull(),
-    documento: text("documento").notNull().unique(),
     uf: text("uf"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
+    primaryKey({ columns: [t.documento, t.periodo] }),
     index("idx_proprietarios_nome").on(t.nome),
     index("idx_proprietarios_uf").on(t.uf),
   ],
@@ -78,9 +84,9 @@ export const proprietarios = pgTable(
 export const operadores = pgTable(
   "operadores",
   {
-    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    documento: text("documento").notNull(),
+    periodo: text("periodo").notNull(),
     nome: text("nome").notNull(),
-    documento: text("documento").notNull().unique(),
     uf: text("uf"),
     operacao135: boolean("operacao135").notNull().default(false),
     transregular135: boolean("transregular135").notNull().default(false),
@@ -94,6 +100,7 @@ export const operadores = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
+    primaryKey({ columns: [t.documento, t.periodo] }),
     index("idx_operadores_nome").on(t.nome),
     index("idx_operadores_uf").on(t.uf),
   ],
@@ -102,35 +109,33 @@ export const operadores = pgTable(
 export const aeronaveProprietarios = pgTable(
   "aeronave_proprietarios",
   {
-    aeronaveMarcas: text("aeronave_marcas")
-      .notNull()
-      .references(() => aeronaves.marcas, { onDelete: "cascade" }),
-    proprietarioId: integer("proprietario_id")
-      .notNull()
-      .references(() => proprietarios.id, { onDelete: "cascade" }),
+    aeronaveMarcas: text("aeronave_marcas").notNull(),
+    periodo: text("periodo").notNull(),
+    proprietarioDocumento: text("proprietario_documento").notNull(),
     percentual: numeric("percentual", { precision: 5, scale: 2 }),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.aeronaveMarcas, t.proprietarioId] }),
-    index("idx_aeronave_prop_proprietario").on(t.proprietarioId),
+    primaryKey({
+      columns: [t.aeronaveMarcas, t.periodo, t.proprietarioDocumento],
+    }),
+    index("idx_aeronave_prop_proprietario").on(t.proprietarioDocumento),
   ],
 );
 
 export const aeronaveOperadores = pgTable(
   "aeronave_operadores",
   {
-    aeronaveMarcas: text("aeronave_marcas")
-      .notNull()
-      .references(() => aeronaves.marcas, { onDelete: "cascade" }),
-    operadorId: integer("operador_id")
-      .notNull()
-      .references(() => operadores.id, { onDelete: "cascade" }),
+    aeronaveMarcas: text("aeronave_marcas").notNull(),
+    periodo: text("periodo").notNull(),
+    operadorDocumento: text("operador_documento").notNull(),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.aeronaveMarcas, t.operadorId] }),
-    index("idx_aeronave_op_operador").on(t.operadorId),
+    primaryKey({
+      columns: [t.aeronaveMarcas, t.periodo, t.operadorDocumento],
+    }),
+    index("idx_aeronave_op_operador").on(t.operadorDocumento),
   ],
 );
 
@@ -166,12 +171,12 @@ export const aeronaveProprietariosRelations = relations(
   aeronaveProprietarios,
   ({ one }) => ({
     aeronave: one(aeronaves, {
-      fields: [aeronaveProprietarios.aeronaveMarcas],
-      references: [aeronaves.marcas],
+      fields: [aeronaveProprietarios.aeronaveMarcas, aeronaveProprietarios.periodo],
+      references: [aeronaves.marcas, aeronaves.periodo],
     }),
     proprietario: one(proprietarios, {
-      fields: [aeronaveProprietarios.proprietarioId],
-      references: [proprietarios.id],
+      fields: [aeronaveProprietarios.proprietarioDocumento, aeronaveProprietarios.periodo],
+      references: [proprietarios.documento, proprietarios.periodo],
     }),
   }),
 );
@@ -180,12 +185,12 @@ export const aeronaveOperadoresRelations = relations(
   aeronaveOperadores,
   ({ one }) => ({
     aeronave: one(aeronaves, {
-      fields: [aeronaveOperadores.aeronaveMarcas],
-      references: [aeronaves.marcas],
+      fields: [aeronaveOperadores.aeronaveMarcas, aeronaveOperadores.periodo],
+      references: [aeronaves.marcas, aeronaves.periodo],
     }),
     operador: one(operadores, {
-      fields: [aeronaveOperadores.operadorId],
-      references: [operadores.id],
+      fields: [aeronaveOperadores.operadorDocumento, aeronaveOperadores.periodo],
+      references: [operadores.documento, operadores.periodo],
     }),
   }),
 );

@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { aeronaveOperadores, aeronaveProprietarios, aeronaves, operadores, proprietarios } from "@/db/schema";
 import { aeronaveSchema, toDate, toInt, toNumeric } from "@/lib/aeronave";
 import { exigirSessao } from "@/lib/auth";
+import { PERIODO_MANUAL, periodoAtual } from "@/lib/periodo";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -31,6 +32,7 @@ export type FiltrosAeronaves = {
 function toInsert(data: z.infer<typeof aeronaveSchema>) {
   return {
     marcas: data.marcas,
+    periodo: PERIODO_MANUAL,
     nrCertMatricula: toInt(data.nrCertMatricula),
     nrSerie: data.nrSerie || null,
     cdTipo: data.cdTipo || null,
@@ -84,7 +86,42 @@ export async function criarAeronave(
       error: `A aeronave ${parsed.data.marcas} já está cadastrada`,
     };
   }
-  await db.insert(aeronaves).values(toInsert(parsed.data));
+  await db
+    .insert(aeronaves)
+    .values(toInsert(parsed.data))
+    .onConflictDoUpdate({
+      target: [aeronaves.marcas, aeronaves.periodo],
+      set: {
+        nrCertMatricula: sql`excluded.nr_cert_matricula`,
+        nrSerie: sql`excluded.nr_serie`,
+        cdTipo: sql`excluded.cd_tipo`,
+        dsModelo: sql`excluded.ds_modelo`,
+        nmFabricante: sql`excluded.nm_fabricante`,
+        cdCls: sql`excluded.cd_cls`,
+        nrPmd: sql`excluded.nr_pmd`,
+        cdTipoIcao: sql`excluded.cd_tipo_icao`,
+        nrTripulacaoMin: sql`excluded.nr_tripulacao_min`,
+        nrPassageirosMax: sql`excluded.nr_passageiros_max`,
+        nrAssentos: sql`excluded.nr_assentos`,
+        nrAnoFabricacao: sql`excluded.nr_ano_fabricacao`,
+        dtValidadeCva: sql`excluded.dt_validade_cva`,
+        dtValidadeCa: sql`excluded.dt_validade_ca`,
+        dtCanc: sql`excluded.dt_canc`,
+        dsMotivoCanc: sql`excluded.ds_motivo_canc`,
+        cdInterdicao: sql`excluded.cd_interdicao`,
+        dsGravame: sql`excluded.ds_gravame`,
+        dtMatricula: sql`excluded.dt_matricula`,
+        tpMotor: sql`excluded.tp_motor`,
+        qtMotor: sql`excluded.qt_motor`,
+        tpPouso: sql`excluded.tp_pouso`,
+        tpCa: sql`excluded.tp_ca`,
+        cdPropositoCave: sql`excluded.cd_proposito_cave`,
+        cfOperacional: sql`excluded.cf_operacional`,
+        dsCategoriaHomologacao: sql`excluded.ds_categoria_homologacao`,
+        tpOperacao: sql`excluded.tp_operacao`,
+        updatedAt: new Date(),
+      },
+    });
   revalidatePath("/aeronaves");
   redirect(`/aeronaves/${parsed.data.marcas}`);
 }
@@ -102,9 +139,15 @@ export async function atualizarAeronave(
     };
   }
   await db
-    .update(aeronaves)
-    .set({ ...toInsert(parsed.data), updatedAt: new Date() })
-    .where(eq(aeronaves.marcas, parsed.data.marcas));
+    .insert(aeronaves)
+    .values(toInsert(parsed.data))
+    .onConflictDoUpdate({
+      target: [aeronaves.marcas, aeronaves.periodo],
+      set: {
+        ...toInsert(parsed.data),
+        updatedAt: new Date(),
+      },
+    });
   revalidatePath("/aeronaves");
   redirect(`/aeronaves/${parsed.data.marcas}`);
 }
@@ -112,7 +155,9 @@ export async function atualizarAeronave(
 export async function excluirAeronave(formData: FormData): Promise<void> {
   await exigirSessao();
   const marcas = String(formData.get("marcas") ?? "");
-  await db.delete(aeronaves).where(eq(aeronaves.marcas, marcas));
+  await db
+    .delete(aeronaves)
+    .where(and(eq(aeronaves.marcas, marcas), eq(aeronaves.periodo, PERIODO_MANUAL)));
   revalidatePath("/aeronaves");
   redirect("/aeronaves");
 }
@@ -125,6 +170,13 @@ export async function buscarAeronaves(
 ) {
   const offset = (pagina - 1) * porPagina;
   const condicoes = [];
+  const pAtual = await periodoAtual();
+  condicoes.push(
+    or(
+      eq(aeronaves.periodo, pAtual ?? ""),
+      eq(aeronaves.periodo, PERIODO_MANUAL),
+    ),
+  );
 
   if (termo.trim()) {
     condicoes.push(
@@ -182,11 +234,18 @@ export async function buscarAeronaves(
           .from(aeronaveProprietarios)
           .innerJoin(
             proprietarios,
-            eq(aeronaveProprietarios.proprietarioId, proprietarios.id),
+            and(
+              eq(
+                aeronaveProprietarios.proprietarioDocumento,
+                proprietarios.documento,
+              ),
+              eq(aeronaveProprietarios.periodo, proprietarios.periodo),
+            ),
           )
           .where(
             and(
               eq(aeronaveProprietarios.aeronaveMarcas, aeronaves.marcas),
+              eq(aeronaveProprietarios.periodo, aeronaves.periodo),
               ilike(proprietarios.nome, `%${filtros.proprietario}%`),
             ),
           ),
@@ -201,11 +260,15 @@ export async function buscarAeronaves(
           .from(aeronaveOperadores)
           .innerJoin(
             operadores,
-            eq(aeronaveOperadores.operadorId, operadores.id),
+            and(
+              eq(aeronaveOperadores.operadorDocumento, operadores.documento),
+              eq(aeronaveOperadores.periodo, operadores.periodo),
+            ),
           )
           .where(
             and(
               eq(aeronaveOperadores.aeronaveMarcas, aeronaves.marcas),
+              eq(aeronaveOperadores.periodo, aeronaves.periodo),
               ilike(operadores.nome, `%${filtros.operador}%`),
             ),
           ),

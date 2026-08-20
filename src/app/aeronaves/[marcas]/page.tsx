@@ -8,6 +8,8 @@ import { Badge, Card } from "@/components/ui";
 import { situacaoLabel } from "@/lib/aeronave";
 import { formatarData, formatarNumero } from "@/lib/format";
 import { BotaoExcluir } from "@/components/botao-excluir";
+import { PERIODO_MANUAL, aeronaves } from "@/db/schema";
+import { desc, sql } from "drizzle-orm";
 
 export const metadata = {
   title: "Detalhes da aeronave",
@@ -21,6 +23,12 @@ export default async function DetalheAeronavePage({
   const { marcas } = await params;
   const aeronave = await db.query.aeronaves.findFirst({
     where: (a, { eq }) => eq(a.marcas, marcas.toUpperCase()),
+    orderBy: [
+      desc(
+        sql`case when ${aeronaves.periodo} = ${PERIODO_MANUAL} then 1 else 0 end`,
+      ),
+      desc(aeronaves.periodo),
+    ],
     with: {
       proprietarios: { with: { proprietario: true } },
       operadores: { with: { operador: true } },
@@ -28,6 +36,8 @@ export default async function DetalheAeronavePage({
   });
 
   if (!aeronave) notFound();
+
+  const ehManual = aeronave.periodo === PERIODO_MANUAL;
 
   const campos: { rotulo: string; valor: React.ReactNode }[] = [
     { rotulo: "Nº certificado de matrícula", valor: aeronave.nrCertMatricula },
@@ -67,14 +77,18 @@ export default async function DetalheAeronavePage({
             <ChevronLeft className="h-4 w-4" /> Voltar
           </Link>
           <div className="flex items-center gap-2">
-            <Link
-              href={`/aeronaves/${aeronave.marcas}/editar`}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
-              aria-label="Editar aeronave"
-            >
-              <Pencil className="h-4 w-4" />
-            </Link>
-            <BotaoExcluir marcas={aeronave.marcas} />
+            {ehManual ? (
+              <>
+                <Link
+                  href={`/aeronaves/${aeronave.marcas}/editar`}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  aria-label="Editar aeronave"
+                >
+                  <Pencil className="h-4 w-4" />
+                </Link>
+                <BotaoExcluir marcas={aeronave.marcas} />
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -93,6 +107,11 @@ export default async function DetalheAeronavePage({
             </h1>
             <Badge className="border-white/30 bg-white/15 text-white">
               {situacaoLabel(aeronave.cdInterdicao)}
+            </Badge>
+            <Badge
+              className={`border-white/30 text-white ${ehManual ? "bg-amber-400/80" : "bg-white/15"}`}
+            >
+              {ehManual ? "Cadastro manual" : `RAB · ${aeronave.periodo}`}
             </Badge>
           </div>
           <p className="mt-1 text-sm text-white/80">
@@ -131,7 +150,7 @@ export default async function DetalheAeronavePage({
             ) : (
               aeronave.proprietarios.map(({ proprietario, percentual }) => (
                 <div
-                  key={proprietario.id}
+                  key={proprietario.documento}
                   className="flex items-start justify-between gap-2 border-t border-zinc-100 pt-2 dark:border-zinc-800"
                 >
                   <div>
@@ -164,7 +183,7 @@ export default async function DetalheAeronavePage({
             ) : (
               aeronave.operadores.map(({ operador }) => (
                 <div
-                  key={operador.id}
+                  key={operador.documento}
                   className="flex items-start justify-between gap-2 border-t border-zinc-100 pt-2 dark:border-zinc-800"
                 >
                   <div>
