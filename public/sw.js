@@ -1,13 +1,7 @@
-const CACHE = "nord-aviation-v1";
-const APP_SHELL = ["/", "/aeronaves", "/aeronaves/novo"];
+const CACHE = "nord-aviation-v2";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener("activate", (event) => {
@@ -26,6 +20,14 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || !request.url.startsWith(self.location.origin)) {
     return;
   }
+
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request).catch(() => caches.match(request)),
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then((cached) => {
       const rede = fetch(request)
