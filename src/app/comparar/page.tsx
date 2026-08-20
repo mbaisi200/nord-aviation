@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   ArrowLeftRight,
+  ArrowRight,
   CheckCircle2,
   FileCode2,
   GitCompare,
@@ -109,10 +110,17 @@ export default async function CompararPage({
         ) : null}
 
         {!imprimir && periodos.length < 2 ? (
-          <Card className="p-4 text-sm text-zinc-500">
-            Ainda só existe um período importado. Quando o próximo arquivo
-            mensal do RAB for importado (via <code>npm run import:rab</code>),
-            você poderá comparar os meses aqui.
+          <Card className="flex flex-col gap-2 p-4 text-sm text-zinc-500">
+            <span>
+              Ainda só existe um período importado. Quando o próximo arquivo
+              mensal do RAB for importado, você poderá comparar os meses aqui.
+            </span>
+            <Link
+              href="/importar"
+              className="inline-flex items-center gap-1 font-semibold text-sky-600 underline underline-offset-2 dark:text-sky-400"
+            >
+              Importar novo mês agora <ArrowRight className="h-4 w-4" />
+            </Link>
           </Card>
         ) : null}
 

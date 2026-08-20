@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { GitCompare, Plane, Search, Plus, Database, ArrowRight } from "lucide-react";
+import { GitCompare, Plane, Search, Plus, Database, ArrowRight, UploadCloud } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Card } from "@/components/ui";
 import { sql } from "drizzle-orm";
@@ -91,6 +91,20 @@ export default async function Home() {
                 <p className="font-semibold">Consultar aeronaves</p>
                 <p className="text-sm text-zinc-500">
                   Busque por prefixo, modelo, fabricante ou série
+                </p>
+              </div>
+              <ArrowRight className="h-4 w-4 text-zinc-400" />
+            </Card>
+          </Link>
+          <Link href="/importar">
+            <Card className="flex items-center gap-3 p-4 transition-all hover:-translate-y-0.5 hover:border-sky-400 hover:shadow-lg">
+              <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-md shadow-sky-600/25">
+                <UploadCloud className="h-5 w-5" />
+              </span>
+              <div className="flex-1">
+                <p className="font-semibold">Atualizar base RAB</p>
+                <p className="text-sm text-zinc-500">
+                  Importe o arquivo mensal da ANAC em poucos cliques
                 </p>
               </div>
               <ArrowRight className="h-4 w-4 text-zinc-400" />

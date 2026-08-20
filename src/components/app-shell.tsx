@@ -3,6 +3,7 @@ import { GitCompare, Plane, Plus, Search } from "lucide-react";
 import { obterSessao } from "@/lib/auth";
 import { MenuUsuario } from "@/components/menu-usuario";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { VERSAO_APP } from "@/lib/versao";
 
 export async function AppShell({ children }: { children: React.ReactNode }) {
   const sessao = await obterSessao();
@@ -17,6 +18,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
             </span>
             <span className="font-display bg-gradient-to-r from-sky-600 to-indigo-600 bg-clip-text text-transparent dark:from-sky-400 dark:to-indigo-400">
               Nord Aviation
+            </span>
+            <span className="rounded-full bg-gradient-to-r from-sky-600 to-indigo-600 px-2 py-1 text-xs font-bold leading-none text-white shadow-sm shadow-sky-600/30 dark:from-sky-500 dark:to-indigo-500">
+              v{VERSAO_APP}
             </span>
           </Link>
           <div className="flex items-center gap-2">
