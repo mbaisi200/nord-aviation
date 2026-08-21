@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { z } from "zod";
 
 export const situacoes = {
@@ -100,4 +101,68 @@ export function toDate(value: string | undefined): Date | null {
 export function toNumeric(value: string | undefined): string | null {
   if (value == null || value === "") return null;
   return value;
+}
+
+export function calcularHashAeronave(d: {
+  nrCertMatricula?: number | null;
+  nrSerie?: string | null;
+  cdTipo?: string | null;
+  dsModelo?: string | null;
+  nmFabricante?: string | null;
+  cdCls?: string | null;
+  nrPmd?: string | null;
+  cdTipoIcao?: string | null;
+  nrTripulacaoMin?: number | null;
+  nrPassageirosMax?: number | null;
+  nrAssentos?: number | null;
+  nrAnoFabricacao?: number | null;
+  dtValidadeCva?: string | null;
+  dtValidadeCa?: Date | string | null;
+  dtCanc?: Date | string | null;
+  dsMotivoCanc?: string | null;
+  cdInterdicao?: string | null;
+  dsGravame?: string | null;
+  dtMatricula?: Date | string | null;
+  tpMotor?: string | null;
+  qtMotor?: number | null;
+  tpPouso?: string | null;
+  tpCa?: string | null;
+  cdPropositoCave?: string | null;
+  cfOperacional?: string | null;
+  dsCategoriaHomologacao?: string | null;
+  tpOperacao?: string | null;
+}): string {
+  // Replica SQL: md5(CAST(json_build_array(col1, col2, ...) AS text))
+  // json_build_array serializa cada valor como JSON (null, string, number)
+  const arr = [
+    d.nrCertMatricula ?? null,
+    d.nrSerie ?? null,
+    d.cdTipo ?? null,
+    d.dsModelo ?? null,
+    d.nmFabricante ?? null,
+    d.cdCls ?? null,
+    d.nrPmd ?? null,
+    d.cdTipoIcao ?? null,
+    d.nrTripulacaoMin ?? null,
+    d.nrPassageirosMax ?? null,
+    d.nrAssentos ?? null,
+    d.nrAnoFabricacao ?? null,
+    d.dtValidadeCva ?? null,
+    d.dtValidadeCa ? (d.dtValidadeCa instanceof Date ? d.dtValidadeCa.toISOString() : String(d.dtValidadeCa)) : null,
+    d.dtCanc ? (d.dtCanc instanceof Date ? d.dtCanc.toISOString() : String(d.dtCanc)) : null,
+    d.dsMotivoCanc ?? null,
+    d.cdInterdicao ?? null,
+    d.dsGravame ?? null,
+    d.dtMatricula ? (d.dtMatricula instanceof Date ? d.dtMatricula.toISOString() : String(d.dtMatricula)) : null,
+    d.tpMotor ?? null,
+    d.qtMotor ?? null,
+    d.tpPouso ?? null,
+    d.tpCa ?? null,
+    d.cdPropositoCave ?? null,
+    d.cfOperacional ?? null,
+    d.dsCategoriaHomologacao ?? null,
+    d.tpOperacao ?? null,
+  ];
+  const json = JSON.stringify(arr);
+  return createHash("md5").update(json).digest("hex");
 }

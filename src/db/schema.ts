@@ -24,6 +24,7 @@ export const aeronaves = pgTable(
     cdCls: text("cd_cls"),
     nrPmd: numeric("nr_pmd", { precision: 8, scale: 0 }),
     cdTipoIcao: text("cd_tipo_icao"),
+    dsTipoIcaoNome: text("ds_tipo_icao_nome"),
     nrTripulacaoMin: integer("nr_tripulacao_min"),
     nrPassageirosMax: integer("nr_passageiros_max"),
     nrAssentos: integer("nr_assentos"),
@@ -43,12 +44,15 @@ export const aeronaves = pgTable(
     cfOperacional: text("cf_operacional"),
     dsCategoriaHomologacao: text("ds_categoria_homologacao"),
     tpOperacao: text("tp_operacao"),
+    hash: text("hash"),
     createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.marcas, t.periodo] }),
     index("idx_aeronaves_periodo").on(t.periodo),
+    index("idx_aeronaves_hash").on(t.hash),
+    index("idx_aeronaves_periodo_hash").on(t.periodo, t.hash),
     index("idx_aeronaves_modelo").on(t.dsModelo),
     index("idx_aeronaves_fabricante").on(t.nmFabricante),
     index("idx_aeronaves_cd_tipo").on(t.cdTipo),
@@ -62,6 +66,8 @@ export const aeronaves = pgTable(
     index("idx_aeronaves_categoria").on(t.dsCategoriaHomologacao),
     index("idx_aeronaves_tp_operacao").on(t.tpOperacao),
     index("idx_aeronaves_periodo_fabricante").on(t.periodo, t.nmFabricante),
+    index("idx_aeronaves_tipo_icao").on(t.cdTipoIcao),
+    index("idx_aeronaves_tipo_icao_nome").on(t.dsTipoIcaoNome),
   ],
 );
 
@@ -155,6 +161,24 @@ export const usuarios = pgTable(
     updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
   },
   (t) => [index("idx_usuarios_login").on(t.login)],
+);
+
+export const comparacoesCache = pgTable(
+  "comparacoes_cache",
+  {
+    base: text("base").notNull(),
+    alvo: text("alvo").notNull(),
+    filtrosHash: text("filtros_hash").notNull(),
+    filtros: text("filtros").notNull(),
+    resultado: text("resultado").notNull(), // JSON stringificado
+    createdAt: timestamp("created_at", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { mode: "date" }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.base, t.alvo, t.filtrosHash] }),
+    index("idx_comparacoes_cache_base_alvo").on(t.base, t.alvo),
+    index("idx_comparacoes_cache_updated").on(t.updatedAt),
+  ],
 );
 
 import { relations } from "drizzle-orm";

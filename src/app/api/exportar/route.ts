@@ -21,10 +21,10 @@ function decodificarValor(campo: string, valor: string): string {
   return valor;
 }
 
-function formatarRegistro(marcas: string, modelo: string | null, tipoIcao: string | null): string {
+function formatarRegistro(marcas: string, modelo: string | null, tipoIcao: string | null, tipoIcaoNome?: string | null): string {
   const parts = [marcas];
   if (modelo || tipoIcao) {
-    const icao = traduzirIcao(tipoIcao);
+    const icao = tipoIcaoNome ?? traduzirIcao(tipoIcao);
     if (modelo && icao) parts.push(`${modelo} (${icao})`);
     else if (icao) parts.push(icao);
     else if (modelo) parts.push(modelo);
@@ -59,7 +59,7 @@ function gerarXls(r: ResultadoComparacao): string {
     h.push(`<table border="1" cellpadding="4" cellspacing="0">`);
     h.push(`<tr><th>Matrícula</th><th>Modelo</th><th>Fabricante</th><th>Tipo ICAO</th><th>Ano Fab.</th><th>Proprietários</th><th>Operadores</th></tr>`);
     for (const n of r.novos) {
-      h.push(`<tr><td>${esc(n.marcas)}</td><td>${esc(n.modelo ?? "")}</td><td>${esc(n.fabricante ?? "")}</td><td>${esc(traduzirIcao(n.tipoIcao))}</td><td>${n.anoFabricacao || ""}</td><td>${esc(n.proprietarios.join(", "))}</td><td>${esc(n.operadores.join(", "))}</td></tr>`);
+      h.push(`<tr><td>${esc(n.marcas)}</td><td>${esc(n.modelo ?? "")}</td><td>${esc(n.fabricante ?? "")}</td><td>${esc((n as unknown as { tipoIcaoNome: string | null }).tipoIcaoNome ?? traduzirIcao(n.tipoIcao))}</td><td>${n.anoFabricacao || ""}</td><td>${esc(n.proprietarios.join(", "))}</td><td>${esc(n.operadores.join(", "))}</td></tr>`);
     }
     h.push(`</table><br/>`);
   }
@@ -70,7 +70,7 @@ function gerarXls(r: ResultadoComparacao): string {
     h.push(`<table border="1" cellpadding="4" cellspacing="0">`);
     h.push(`<tr><th>Matrícula</th><th>Modelo</th><th>Fabricante</th><th>Tipo ICAO</th><th>Ano Fab.</th><th>Proprietários</th><th>Operadores</th></tr>`);
     for (const rm of r.removidos) {
-      h.push(`<tr><td>${esc(rm.marcas)}</td><td>${esc(rm.modelo ?? "")}</td><td>${esc(rm.fabricante ?? "")}</td><td>${esc(traduzirIcao(rm.tipoIcao))}</td><td>${rm.anoFabricacao || ""}</td><td>${esc(rm.proprietarios.join(", "))}</td><td>${esc(rm.operadores.join(", "))}</td></tr>`);
+      h.push(`<tr><td>${esc(rm.marcas)}</td><td>${esc(rm.modelo ?? "")}</td><td>${esc(rm.fabricante ?? "")}</td><td>${esc((rm as unknown as { tipoIcaoNome: string | null }).tipoIcaoNome ?? traduzirIcao(rm.tipoIcao))}</td><td>${rm.anoFabricacao || ""}</td><td>${esc(rm.proprietarios.join(", "))}</td><td>${esc(rm.operadores.join(", "))}</td></tr>`);
     }
     h.push(`</table><br/>`);
   }
@@ -81,11 +81,12 @@ function gerarXls(r: ResultadoComparacao): string {
     h.push(`<table border="1" cellpadding="4" cellspacing="0">`);
     h.push(`<tr><th>Matrícula</th><th>Modelo</th><th>Tipo ICAO</th><th>Ano Fab.</th><th>Campo</th><th>Antes</th><th>Depois</th></tr>`);
     for (const d of r.alterados) {
+      const icaoNome = (d as unknown as { tipoIcaoNome: string | null }).tipoIcaoNome ?? traduzirIcao(d.tipoIcao);
       if (d.campos.length === 0) {
-        h.push(`<tr><td>${esc(d.marcas)}</td><td>${esc(d.modelo ?? "")}</td><td>${esc(traduzirIcao(d.tipoIcao))}</td><td>${d.anoFabricacao || ""}</td><td></td><td></td><td></td></tr>`);
+        h.push(`<tr><td>${esc(d.marcas)}</td><td>${esc(d.modelo ?? "")}</td><td>${esc(icaoNome)}</td><td>${d.anoFabricacao || ""}</td><td></td><td></td><td></td></tr>`);
       } else {
         for (const c of d.campos) {
-          h.push(`<tr><td>${esc(d.marcas)}</td><td>${esc(d.modelo ?? "")}</td><td>${esc(traduzirIcao(d.tipoIcao))}</td><td>${d.anoFabricacao || ""}</td><td>${esc(c.campo)}</td><td>${esc(decodificarValor(c.campo, c.antes))}</td><td>${esc(decodificarValor(c.campo, c.depois))}</td></tr>`);
+          h.push(`<tr><td>${esc(d.marcas)}</td><td>${esc(d.modelo ?? "")}</td><td>${esc(icaoNome)}</td><td>${d.anoFabricacao || ""}</td><td>${esc(c.campo)}</td><td>${esc(decodificarValor(c.campo, c.antes))}</td><td>${esc(decodificarValor(c.campo, c.depois))}</td></tr>`);
         }
       }
     }

@@ -9,6 +9,7 @@ import { aeronaveOperadores, aeronaveProprietarios, aeronaves, operadores, propr
 import { aeronaveSchema, toDate, toInt, toNumeric } from "@/lib/aeronave";
 import { exigirSessao } from "@/lib/auth";
 import { PERIODO_MANUAL, periodoAtual } from "@/lib/periodo";
+import { traduzirIcao } from "@/lib/icao-types";
 
 export type ActionState = { ok: boolean; error?: string };
 
@@ -30,6 +31,8 @@ export type FiltrosAeronaves = {
 };
 
 function toInsert(data: z.infer<typeof aeronaveSchema>) {
+  const cdIcao = data.cdTipoIcao?.trim() || null;
+  const nomeIcao = cdIcao ? traduzirIcao(cdIcao) : "";
   return {
     marcas: data.marcas,
     periodo: PERIODO_MANUAL,
@@ -40,7 +43,8 @@ function toInsert(data: z.infer<typeof aeronaveSchema>) {
     nmFabricante: data.nmFabricante || null,
     cdCls: data.cdCls || null,
     nrPmd: toNumeric(data.nrPmd),
-    cdTipoIcao: data.cdTipoIcao || null,
+    cdTipoIcao: cdIcao,
+    dsTipoIcaoNome: nomeIcao && nomeIcao !== cdIcao ? nomeIcao : nomeIcao || null,
     nrTripulacaoMin: toInt(data.nrTripulacaoMin),
     nrPassageirosMax: toInt(data.nrPassageirosMax),
     nrAssentos: toInt(data.nrAssentos),
@@ -100,6 +104,7 @@ export async function criarAeronave(
         cdCls: sql`excluded.cd_cls`,
         nrPmd: sql`excluded.nr_pmd`,
         cdTipoIcao: sql`excluded.cd_tipo_icao`,
+        dsTipoIcaoNome: sql`excluded.ds_tipo_icao_nome`,
         nrTripulacaoMin: sql`excluded.nr_tripulacao_min`,
         nrPassageirosMax: sql`excluded.nr_passageiros_max`,
         nrAssentos: sql`excluded.nr_assentos`,
@@ -183,6 +188,8 @@ export async function buscarAeronaves(
       or(
         ilike(aeronaves.marcas, `%${termo}%`),
         ilike(aeronaves.dsModelo, `%${termo}%`),
+        ilike(aeronaves.dsTipoIcaoNome, `%${termo}%`),
+        ilike(aeronaves.cdTipoIcao, `%${termo}%`),
         ilike(aeronaves.nmFabricante, `%${termo}%`),
         ilike(aeronaves.nrSerie, `%${termo}%`),
       ),
@@ -197,7 +204,13 @@ export async function buscarAeronaves(
     condicoes.push(ilike(aeronaves.nmFabricante, `%${filtros.fabricante}%`));
   }
   if (filtros.modelo) {
-    condicoes.push(ilike(aeronaves.dsModelo, `%${filtros.modelo}%`));
+    condicoes.push(
+      or(
+        ilike(aeronaves.dsModelo, `%${filtros.modelo}%`),
+        ilike(aeronaves.dsTipoIcaoNome, `%${filtros.modelo}%`),
+        ilike(aeronaves.cdTipoIcao, `%${filtros.modelo}%`),
+      ),
+    );
   }
   if (filtros.tpMotor) {
     condicoes.push(eq(aeronaves.tpMotor, filtros.tpMotor));

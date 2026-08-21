@@ -44,7 +44,7 @@ export default async function DetalheAeronavePage({
     { rotulo: "Nº de série", valor: aeronave.nrSerie },
     { rotulo: "Código de tipo", valor: aeronave.cdTipo },
     { rotulo: "Classe", valor: aeronave.cdCls },
-    { rotulo: "Tipo ICAO", valor: aeronave.cdTipoIcao },
+    { rotulo: "Tipo ICAO", valor: aeronave.cdTipoIcao ? `${aeronave.cdTipoIcao}${aeronave.dsTipoIcaoNome ? ` (${aeronave.dsTipoIcaoNome})` : ""}` : null },
     { rotulo: "PMD (kg)", valor: formatarNumero(aeronave.nrPmd) },
     { rotulo: "Tripulação mínima", valor: aeronave.nrTripulacaoMin },
     { rotulo: "Passageiros máx.", valor: aeronave.nrPassageirosMax },
@@ -116,6 +116,7 @@ export default async function DetalheAeronavePage({
           </div>
           <p className="mt-1 text-sm text-white/80">
             {aeronave.dsModelo ?? "Modelo não informado"}
+            {aeronave.dsTipoIcaoNome ? ` (${aeronave.dsTipoIcaoNome})` : ""}
             {aeronave.nmFabricante ? ` · ${aeronave.nmFabricante}` : ""}
           </p>
         </div>

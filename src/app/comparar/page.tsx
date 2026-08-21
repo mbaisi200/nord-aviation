@@ -17,19 +17,22 @@ import { CardResumo } from "@/components/card-resumo-comparacao";
 import { ModalRelatorio } from "@/components/modal-relatorio";
 import { situacaoLabel } from "@/lib/aeronave";
 import { traduzirIcao } from "@/lib/icao-types";
+import { CardNovo } from "@/components/card-novo";
 import {
   compararMatricula,
   compararPeriodos,
   listarPeriodos,
 } from "@/app/actions/comparar";
 import { AutoImprimir } from "@/components/auto-imprimir";
+import { NavigationLoader } from "@/components/navigation-loader";
+import { FormComparar } from "@/components/form-comparar";
 
 export const metadata = {
   title: "Comparar períodos do RAB",
 };
 
-function formatarRegistro(marcas: string, modelo: string | null, tipoIcao: string | null, operadores?: string[], proprietarios?: string[], anoFabricacao?: number | null, fabricante?: string | null): React.ReactNode {
-  const icao = traduzirIcao(tipoIcao);
+function formatarRegistro(marcas: string, modelo: string | null, tipoIcao: string | null, operadores?: string[], proprietarios?: string[], anoFabricacao?: number | null, fabricante?: string | null, tipoIcaoNome?: string | null): React.ReactNode {
+  const icao = tipoIcaoNome ?? traduzirIcao(tipoIcao);
   const detalhes = [modelo, fabricante, icao && icao !== modelo ? `(${icao})` : null, anoFabricacao ? String(anoFabricacao) : null].filter(Boolean).join(" ");
   return (
     <span className="inline-flex items-center gap-2">
@@ -158,6 +161,7 @@ export default async function CompararPage({
 
   return (
     <AppShell>
+      <NavigationLoader />
       {imprimir && resultado ? <AutoImprimir /> : null}
       <div className="flex flex-col gap-4">
         {!imprimir ? (
@@ -174,42 +178,7 @@ export default async function CompararPage({
 
         {!imprimir ? (
           <Card className="p-4">
-            <form method="GET" action="/comparar" className="flex flex-col gap-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Período base (antes)
-                  <select
-                    name="base"
-                    defaultValue={base ?? periodos[1] ?? periodos[0]}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    {periodos.map((p) => (
-                      <option key={p} value={p}>
-                        {formatarPeriodo(p)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Período comparativo (depois)
-                  <select
-                    name="alvo"
-                    defaultValue={alvo ?? periodos[0]}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    {periodos.map((p) => (
-                      <option key={p} value={p}>
-                        {formatarPeriodo(p)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <Button type="submit">
-                <GitCompare className="h-4 w-4" />
-                Comparar
-              </Button>
-            </form>
+            <FormComparar periodos={periodos} base={base} alvo={alvo} />
           </Card>
         ) : null}
 
@@ -781,36 +750,11 @@ export default async function CompararPage({
               {resultado.novos.length === 0 ? (
                 <p className="text-sm text-zinc-500">Nenhum registro novo.</p>
               ) : (
-                <Card className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                <div className="flex flex-col gap-3">
                   {resultado.novos.map((r) => (
-                    <Link
-                      key={r.marcas}
-                      href={`/aeronaves/${r.marcas}`}
-                      className="flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-sky-50/50 dark:hover:bg-sky-950/20"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-base font-bold tracking-wider text-emerald-600 dark:text-emerald-400">
-                            {r.marcas}
-                          </span>
-                          {r.modelo ? (
-                            <span className="text-sm font-medium text-purple-600 dark:text-purple-400">{r.modelo}</span>
-                          ) : null}
-                          {r.fabricante ? (
-                            <span className="text-xs text-zinc-400">· {r.fabricante}</span>
-                          ) : null}
-                        </div>
-                        <span className="text-xs text-zinc-400">ver detalhes →</span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-                        {r.tipoIcao ? <span>ICAO: {traduzirIcao(r.tipoIcao)}</span> : null}
-                        {r.anoFabricacao ? <span>Ano: {r.anoFabricacao}</span> : null}
-                        {r.proprietarios.length > 0 ? <span>Prop.: {r.proprietarios.join(", ")}</span> : null}
-                        {r.operadores.length > 0 ? <span>Op.: {r.operadores.join(", ")}</span> : null}
-                      </div>
-                    </Link>
+                    <CardNovo key={r.marcas} r={r} />
                   ))}
-                </Card>
+                </div>
               )}
             </section>
 
@@ -868,7 +812,7 @@ export default async function CompararPage({
                             href={`/aeronaves/${d.marcas}`}
                             className="text-base text-sky-600 hover:underline dark:text-sky-400"
                           >
-                            {formatarRegistro(d.marcas, d.modelo, d.tipoIcao, undefined, undefined, d.anoFabricacao)}
+                            {formatarRegistro(d.marcas, d.modelo, d.tipoIcao, undefined, undefined, d.anoFabricacao, undefined, d.tipoIcaoNome)}
                           </Link>
                         </div>
                         <Badge>{d.campos.length} alteração(ões)</Badge>
@@ -963,7 +907,7 @@ export default async function CompararPage({
                         <tr key={d.marcas} className="border-b border-zinc-100 dark:border-zinc-800">
                           <td className="px-3 py-2">
                             <span className="text-sky-600 dark:text-sky-400">
-                              {formatarRegistro(d.marcas, d.modelo, d.tipoIcao, undefined, undefined, d.anoFabricacao)}
+                              {formatarRegistro(d.marcas, d.modelo, d.tipoIcao, undefined, undefined, d.anoFabricacao, undefined, d.tipoIcaoNome)}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-red-500 line-through decoration-red-400/60">{decodificarValor(campoFiltro, campo.antes)}</td>

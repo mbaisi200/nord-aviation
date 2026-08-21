@@ -1,15 +1,17 @@
 "use server";
 
-import { eq, sql } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
   aeronaveOperadores,
   aeronaveProprietarios,
   aeronaves,
+  comparacoesCache,
   operadores,
   proprietarios,
 } from "@/db/schema";
+import { compararCache } from "@/lib/comparar-cache";
 import { exigirSessao } from "@/lib/auth";
 import {
   parseJsonField,
@@ -19,6 +21,7 @@ import {
   toPmd,
   toSituacao,
 } from "@/lib/rab";
+import { traduzirIcao } from "@/lib/icao-types";
 
 const BATCH = 500;
 const MAX_LOTE = 3000;
@@ -43,6 +46,9 @@ export async function iniciarImportacao(
   await db
     .delete(aeronaveOperadores)
     .where(eq(aeronaveOperadores.periodo, periodo));
+  // Invalida cache de comparações que envolvem este período
+  await db.delete(comparacoesCache).where(or(eq(comparacoesCache.base, periodo), eq(comparacoesCache.alvo, periodo)));
+  compararCache.clear();
   revalidatePath("/");
   revalidatePath("/aeronaves");
   revalidatePath("/comparar");
@@ -69,6 +75,8 @@ export async function importarLote(
   for (const l of linhas) {
     const marcas = (l.MARCAS ?? "").trim();
     if (!marcas) continue;
+    const cdTipoIcaoRaw = l.CD_TIPO_ICAO?.trim() || null;
+    const dsTipoIcaoNomeRaw = cdTipoIcaoRaw ? traduzirIcao(cdTipoIcaoRaw) : "";
     registros.push({
       marcas,
       periodo,
@@ -79,7 +87,8 @@ export async function importarLote(
       nmFabricante: l.NM_FABRICANTE?.trim() || null,
       cdCls: l.CD_CLS?.trim() || null,
       nrPmd: toPmd(l.NR_PMD),
-      cdTipoIcao: l.CD_TIPO_ICAO?.trim() || null,
+      cdTipoIcao: cdTipoIcaoRaw,
+      dsTipoIcaoNome: dsTipoIcaoNomeRaw && dsTipoIcaoNomeRaw !== cdTipoIcaoRaw ? dsTipoIcaoNomeRaw : dsTipoIcaoNomeRaw || null,
       nrTripulacaoMin: toInt(l.NR_TRIPULACAO_MIN),
       nrPassageirosMax: toInt(l.NR_PASSAGEIROS_MAX),
       nrAssentos: toInt(l.NR_ASSENTOS),
@@ -190,6 +199,7 @@ export async function importarLote(
           cdCls: sql`excluded.cd_cls`,
           nrPmd: sql`excluded.nr_pmd`,
           cdTipoIcao: sql`excluded.cd_tipo_icao`,
+          dsTipoIcaoNome: sql`excluded.ds_tipo_icao_nome`,
           nrTripulacaoMin: sql`excluded.nr_tripulacao_min`,
           nrPassageirosMax: sql`excluded.nr_passageiros_max`,
           nrAssentos: sql`excluded.nr_assentos`,
@@ -213,6 +223,11 @@ export async function importarLote(
         },
       });
   }
+  // Calcula hash materializado via SQL para comparação rápida (evita md5 em tempo de consulta)
+  await db.execute(sql`
+    UPDATE aeronaves SET hash = md5(CAST(json_build_array(nr_cert_matricula, nr_serie, cd_tipo, ds_modelo, nm_fabricante, cd_cls, nr_pmd, cd_tipo_icao, nr_tripulacao_min, nr_passageiros_max, nr_assentos, nr_ano_fabricacao, dt_validade_cva, dt_validade_ca, dt_canc, ds_motivo_canc, cd_interdicao, ds_gravame, dt_matricula, tp_motor, qt_motor, tp_pouso, tp_ca, cd_proposito_cave, cf_operacional, ds_categoria_homologacao, tp_operacao) AS text))
+    WHERE periodo = ${periodo} AND hash IS NULL
+  `);
 
   for (let i = 0; i < vinculosProp.length; i += BATCH) {
     await db
@@ -226,6 +241,9 @@ export async function importarLote(
       .values(vinculosOp.slice(i, i + BATCH))
       .onConflictDoNothing();
   }
+  // Invalida cache que envolve este período (próxima comparação será recalculada)
+  await db.delete(comparacoesCache).where(or(eq(comparacoesCache.base, periodo), eq(comparacoesCache.alvo, periodo)));
+  compararCache.clear();
 
   return { ok: true };
 }

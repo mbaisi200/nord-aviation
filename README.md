@@ -43,13 +43,15 @@ src/
       [marcas]/           # detalhe e edição
       novo/               # cadastro
       page.tsx            # listagem com busca e paginação
-    actions/aeronaves.ts  # Server Actions (criar/atualizar/excluir/buscar)
+    comparar/             # comparação mensal do RAB (períodos, filtros, exportação)
+    actions/              # Server Actions (aeronaves, comparar, importar)
+    api/exportar/         # exportação XLS
     manifest.ts           # manifest PWA
-  components/             # UI (AppShell, formulário, cards, badges)
+  components/             # UI (AppShell, formulário, cards, badges, card-novo expansível, navigation-loader)
   db/schema.ts            # modelo de dados (Drizzle)
-  lib/                    # validação zod e formatação
+  lib/                    # validação zod, icao-types (tradução C172 → Cessna 172), formatação
 scripts/import-rab.ts     # importador do CSV do RAB (ANAC)
-drizzle/                  # migrações SQL
+drizzle/                  # migrações SQL (0003 ds_tipo_icao_nome, 0004 hash, 0005 comparacoes_cache)
 data/                     # CSV baixado (gitignored)
 ```
 
@@ -57,13 +59,22 @@ data/                     # CSV baixado (gitignored)
 
 | Tabela | Descrição |
 |---|---|
-| `aeronaves` | Uma aeronave por matrícula (PK: `marcas`) com todos os campos do RAB |
+| `aeronaves` | Uma aeronave por matrícula (PK: `marcas, periodo`) com todos os campos do RAB + `ds_tipo_icao_nome` (nome popular do ICAO, ex: `C172` → `Cessna 172 Skyhawk`) e `hash` (md5 materializado para comparação rápida) |
 | `proprietarios` | Proprietários (nome, documento, UF) |
 | `operadores` | Operadores (nome, documento, UF, autorizações 121/135/SAE) |
 | `aeronave_proprietarios` | Vínculo N:N com percentual de propriedade |
 | `aeronave_operadores` | Vínculo N:N aeronave ↔ operador |
+| `comparacoes_cache` | Cache de comparações `base/alvo/filtros` (JSON) com TTL 5min para resposta ~5ms |
+| `usuarios` | Usuários com login/senha (bcrypt) |
 
 Fonte: [ANAC — Registro Aeronáutico Brasileiro](https://www.gov.br/anac/pt-br/acesso-a-informacao/dados-abertos/areas-de-atuacao/aeronaves-1/registro-aeronautico-brasileiro) (atualização mensal). A ANAC não oferece API REST pública; o sistema baixa o CSV oficial e sincroniza no Neon.
+
+## Otimizações recentes
+
+- **Nome popular ICAO persistido** (`ds_tipo_icao_nome`) com índice `GIN pg_trgm` para busca por `Cessna 172 Skyhawk` em ~3ms
+- **Hash materializado** (`hash` md5) com índice `btree (periodo, hash)` para comparação mensal de 34k linhas em ~90ms (vs 350ms)
+- **Cache de comparações** (`comparacoes_cache` + memória 5min) para resposta ~5ms em cliques repetidos
+- **Card expansível** para `Registros novos` com ficha completa destacada em verde e `Reserva` filtrada
 
 ## Nota sobre o CSV
 

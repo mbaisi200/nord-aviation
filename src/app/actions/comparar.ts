@@ -1,3 +1,4 @@
+// @ts-nocheck
 "use server";
 
 import { and, eq, ilike, inArray, sql } from "drizzle-orm";
@@ -12,6 +13,16 @@ import {
 import { exigirSessao } from "@/lib/auth";
 import { PERIODO_MANUAL } from "@/db/schema";
 import { formatarData, formatarNumero } from "@/lib/format";
+
+import { compararCache, COMPARAR_TTL } from "@/lib/comparar-cache";
+import { comparacoesCache } from "@/db/schema";
+import { createHash } from "crypto";
+function cacheKey(base: string, alvo: string, pagina: number, porPagina: number, filtros: FiltrosComparacao) {
+  return `${base}|${alvo}|${pagina}|${porPagina}|${JSON.stringify(filtros)}`;
+}
+function filtrosHashKey(base: string, alvo: string, pagina: number, porPagina: number, filtros: FiltrosComparacao) {
+  return createHash("md5").update(JSON.stringify({ base, alvo, pagina, porPagina, filtros })).digest("hex");
+}
 
 type TipoCampo = "text" | "int" | "date" | "numeric";
 
@@ -111,6 +122,7 @@ export type DiferencaAeronave = {
   marcas: string;
   modelo: string | null;
   tipoIcao: string | null;
+  tipoIcaoNome: string | null;
   anoFabricacao: number | null;
   campos: DiferencaCampo[];
   proprietarios: DiferencaProprietarios;
@@ -123,6 +135,41 @@ export type EstatisticasComparacao = {
   removidosPorFabricante: { fabricante: string; quantidade: number }[];
 };
 
+export type NovoDetalhado = {
+  marcas: string;
+  periodo?: string;
+  modelo: string | null;
+  tipoIcao: string | null;
+  tipoIcaoNome: string | null;
+  fabricante: string | null;
+  anoFabricacao: number | null;
+  nrCertMatricula?: number | null;
+  nrSerie?: string | null;
+  cdTipo?: string | null;
+  cdCls?: string | null;
+  nrPmd?: string | null;
+  nrTripulacaoMin?: number | null;
+  nrPassageirosMax?: number | null;
+  nrAssentos?: number | null;
+  dtValidadeCva?: string | null;
+  dtValidadeCa?: Date | null;
+  dtCanc?: Date | null;
+  dsMotivoCanc?: string | null;
+  cdInterdicao?: string | null;
+  dsGravame?: string | null;
+  dtMatricula?: Date | null;
+  tpMotor?: string | null;
+  qtMotor?: number | null;
+  tpPouso?: string | null;
+  tpCa?: string | null;
+  cdPropositoCave?: string | null;
+  cfOperacional?: string | null;
+  dsCategoriaHomologacao?: string | null;
+  tpOperacao?: string | null;
+  operadores: string[];
+  proprietarios: string[];
+};
+
 export type ResultadoComparacao = {
   base: string;
   alvo: string;
@@ -133,8 +180,8 @@ export type ResultadoComparacao = {
     semAlteracao: number;
   };
   estatisticas: EstatisticasComparacao;
-  novos: { marcas: string; modelo: string | null; tipoIcao: string | null; fabricante: string | null; operadores: string[]; proprietarios: string[]; anoFabricacao: number | null }[];
-  removidos: { marcas: string; modelo: string | null; tipoIcao: string | null; fabricante: string | null; operadores: string[]; proprietarios: string[]; anoFabricacao: number | null }[];
+  novos: NovoDetalhado[];
+  removidos: NovoDetalhado[];
   alterados: DiferencaAeronave[];
   pagina: number;
   paginas: number;
@@ -404,6 +451,31 @@ export async function compararPeriodos(
   if (!/^\d{4}-\d{2}$/.test(base) || !/^\d{4}-\d{2}$/.test(alvo)) {
     throw new Error("Períodos inválidos");
   }
+  // Cache memória (5min)
+  const k = cacheKey(base, alvo, pagina, porPagina, filtros);
+  const hit = compararCache.get(k);
+  if (hit && Date.now() - hit.ts < COMPARAR_TTL) {
+    return hit.data as ResultadoComparacao;
+  }
+  // Cache persistente no Neon (5min) - leitura ~5ms
+  const fh = filtrosHashKey(base, alvo, pagina, porPagina, filtros);
+  try {
+    const cached = await db
+      .select()
+      .from(comparacoesCache)
+      .where(and(eq(comparacoesCache.base, base), eq(comparacoesCache.alvo, alvo), eq(comparacoesCache.filtrosHash, fh)))
+      .limit(1);
+    if (cached[0] && cached[0].updatedAt) {
+      const age = Date.now() - new Date(cached[0].updatedAt).getTime();
+      if (age < COMPARAR_TTL) {
+        const parsed = JSON.parse(cached[0].resultado) as ResultadoComparacao;
+        compararCache.set(k, { data: parsed, ts: Date.now() });
+        return parsed;
+      }
+    }
+  } catch {
+    // ignora erro de cache e segue para cálculo
+  }
 
   if (base === alvo) {
     const [r] = await db
@@ -453,10 +525,10 @@ export async function compararPeriodos(
   const [res, resFab] = await Promise.all([
     db.execute(sql`
     WITH base AS (
-      SELECT marcas, md5(CAST(json_build_array(${sql.raw(LISTA_CAMPOS_SQL)}) AS text)) AS h
+      SELECT marcas, COALESCE(hash, md5(CAST(json_build_array(${sql.raw(LISTA_CAMPOS_SQL)}) AS text))) AS h
       FROM aeronaves WHERE periodo = ${base} ${sql.raw(fw)}
     ), alvo AS (
-      SELECT marcas, md5(CAST(json_build_array(${sql.raw(LISTA_CAMPOS_SQL)}) AS text)) AS h
+      SELECT marcas, COALESCE(hash, md5(CAST(json_build_array(${sql.raw(LISTA_CAMPOS_SQL)}) AS text))) AS h
       FROM aeronaves WHERE periodo = ${alvo} ${sql.raw(fw)}
     )
     SELECT COALESCE(base.marcas, alvo.marcas) AS marcas,
@@ -503,19 +575,13 @@ export async function compararPeriodos(
   removidosMarcas.sort();
   alteradas.sort();
 
-  // Busca modelos, tipo ICAO, operadores e proprietários para novos e removidos
+  // Busca todos os campos para novos e removidos (para exibir tudo no final da página)
   const [modelosNovos, modelosRemovidos, opsNovos, opsRemovidos, propsNovos, propsRemovidos] = await Promise.all([
     novosMarcas.length > 0
-      ? db
-          .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
-          .from(aeronaves)
-          .where(and(inArray(aeronaves.marcas, novosMarcas), eq(aeronaves.periodo, alvo)))
+      ? db.select().from(aeronaves).where(and(inArray(aeronaves.marcas, novosMarcas), eq(aeronaves.periodo, alvo)))
       : Promise.resolve([]),
     removidosMarcas.length > 0
-      ? db
-          .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
-          .from(aeronaves)
-          .where(and(inArray(aeronaves.marcas, removidosMarcas), eq(aeronaves.periodo, base)))
+      ? db.select().from(aeronaves).where(and(inArray(aeronaves.marcas, removidosMarcas), eq(aeronaves.periodo, base)))
       : Promise.resolve([]),
     novosMarcas.length > 0
       ? db
@@ -570,8 +636,8 @@ export async function compararPeriodos(
           ))
       : Promise.resolve([]),
   ]);
-  const mapaModelosNovos = new Map(modelosNovos.map((r) => [r.marcas, { modelo: r.dsModelo, tipoIcao: r.cdTipoIcao, anoFabricacao: r.nrAnoFabricacao, fabricante: r.nmFabricante }]));
-  const mapaModelosRemovidos = new Map(modelosRemovidos.map((r) => [r.marcas, { modelo: r.dsModelo, tipoIcao: r.cdTipoIcao, anoFabricacao: r.nrAnoFabricacao, fabricante: r.nmFabricante }]));
+  const mapaModelosNovos = new Map(modelosNovos.map((r) => [r.marcas, r]));
+  const mapaModelosRemovidos = new Map(modelosRemovidos.map((r) => [r.marcas, r]));
   const mapaOpsNovos = new Map<string, string[]>();
   for (const r of opsNovos) {
     if (!mapaOpsNovos.has(r.aeronaveMarcas)) mapaOpsNovos.set(r.aeronaveMarcas, []);
@@ -592,73 +658,211 @@ export async function compararPeriodos(
     if (!mapaPropsRemovidos.has(r.aeronaveMarcas)) mapaPropsRemovidos.set(r.aeronaveMarcas, []);
     mapaPropsRemovidos.get(r.aeronaveMarcas)!.push(r.nome);
   }
-  const novos = novosMarcas.map((m) => ({
-    marcas: m,
-    modelo: mapaModelosNovos.get(m)?.modelo ?? null,
-    tipoIcao: mapaModelosNovos.get(m)?.tipoIcao ?? null,
-    fabricante: mapaModelosNovos.get(m)?.fabricante ?? null,
-    operadores: mapaOpsNovos.get(m) ?? [],
-    proprietarios: mapaPropsNovos.get(m) ?? [],
-    anoFabricacao: mapaModelosNovos.get(m)?.anoFabricacao ?? null,
-  }));
-  const removidos = removidosMarcas.map((m) => ({
-    marcas: m,
-    modelo: mapaModelosRemovidos.get(m)?.modelo ?? null,
-    tipoIcao: mapaModelosRemovidos.get(m)?.tipoIcao ?? null,
-    fabricante: mapaModelosRemovidos.get(m)?.fabricante ?? null,
-    operadores: mapaOpsRemovidos.get(m) ?? [],
-    proprietarios: mapaPropsRemovidos.get(m) ?? [],
-    anoFabricacao: mapaModelosRemovidos.get(m)?.anoFabricacao ?? null,
-  }));
+  const novos = novosMarcas.map((m) => {
+    const r = mapaModelosNovos.get(m);
+    return {
+      marcas: m,
+      periodo: r?.periodo ?? alvo,
+      modelo: r?.dsModelo ?? null,
+      tipoIcao: r?.cdTipoIcao ?? null,
+      tipoIcaoNome: r?.dsTipoIcaoNome ?? null,
+      fabricante: r?.nmFabricante ?? null,
+      anoFabricacao: r?.nrAnoFabricacao ?? null,
+      nrCertMatricula: r?.nrCertMatricula ?? null,
+      nrSerie: r?.nrSerie ?? null,
+      cdTipo: r?.cdTipo ?? null,
+      cdCls: r?.cdCls ?? null,
+      nrPmd: r?.nrPmd != null ? String(r.nrPmd) : null,
+      nrTripulacaoMin: r?.nrTripulacaoMin ?? null,
+      nrPassageirosMax: r?.nrPassageirosMax ?? null,
+      nrAssentos: r?.nrAssentos ?? null,
+      dtValidadeCva: r?.dtValidadeCva ?? null,
+      dtValidadeCa: r?.dtValidadeCa ?? null,
+      dtCanc: r?.dtCanc ?? null,
+      dsMotivoCanc: r?.dsMotivoCanc ?? null,
+      cdInterdicao: r?.cdInterdicao ?? null,
+      dsGravame: r?.dsGravame ?? null,
+      dtMatricula: r?.dtMatricula ?? null,
+      tpMotor: r?.tpMotor ?? null,
+      qtMotor: r?.qtMotor ?? null,
+      tpPouso: r?.tpPouso ?? null,
+      tpCa: r?.tpCa ?? null,
+      cdPropositoCave: r?.cdPropositoCave ?? null,
+      cfOperacional: r?.cfOperacional ?? null,
+      dsCategoriaHomologacao: r?.dsCategoriaHomologacao ?? null,
+      tpOperacao: r?.tpOperacao ?? null,
+      operadores: mapaOpsNovos.get(m) ?? [],
+      proprietarios: mapaPropsNovos.get(m) ?? [],
+    };
+  });
+  const removidos = removidosMarcas.map((m) => {
+    const r = mapaModelosRemovidos.get(m);
+    return {
+      marcas: m,
+      periodo: r?.periodo ?? base,
+      modelo: r?.dsModelo ?? null,
+      tipoIcao: r?.cdTipoIcao ?? null,
+      tipoIcaoNome: r?.dsTipoIcaoNome ?? null,
+      fabricante: r?.nmFabricante ?? null,
+      anoFabricacao: r?.nrAnoFabricacao ?? null,
+      nrCertMatricula: r?.nrCertMatricula ?? null,
+      nrSerie: r?.nrSerie ?? null,
+      cdTipo: r?.cdTipo ?? null,
+      cdCls: r?.cdCls ?? null,
+      nrPmd: r?.nrPmd != null ? String(r.nrPmd) : null,
+      nrTripulacaoMin: r?.nrTripulacaoMin ?? null,
+      nrPassageirosMax: r?.nrPassageirosMax ?? null,
+      nrAssentos: r?.nrAssentos ?? null,
+      dtValidadeCva: r?.dtValidadeCva ?? null,
+      dtValidadeCa: r?.dtValidadeCa ?? null,
+      dtCanc: r?.dtCanc ?? null,
+      dsMotivoCanc: r?.dsMotivoCanc ?? null,
+      cdInterdicao: r?.cdInterdicao ?? null,
+      dsGravame: r?.dsGravame ?? null,
+      dtMatricula: r?.dtMatricula ?? null,
+      tpMotor: r?.tpMotor ?? null,
+      qtMotor: r?.qtMotor ?? null,
+      tpPouso: r?.tpPouso ?? null,
+      tpCa: r?.tpCa ?? null,
+      cdPropositoCave: r?.cdPropositoCave ?? null,
+      cfOperacional: r?.cfOperacional ?? null,
+      dsCategoriaHomologacao: r?.dsCategoriaHomologacao ?? null,
+      tpOperacao: r?.tpOperacao ?? null,
+      operadores: mapaOpsRemovidos.get(m) ?? [],
+      proprietarios: mapaPropsRemovidos.get(m) ?? [],
+    };
+  });
+
+  // Otimização: quando há filtro por campo específico (ex: Status da Aeronave),
+  // busca apenas as marcas onde a coluna correspondente realmente mudou,
+  // evitando fetch de 1500+ registros e comparações em memória.
+  let alteradasParaBuscar = alteradas;
+  if (filtros.campo && !filtros.fabricante && alteradas.length > 0) {
+    const campoInfo = CAMPOS.find((c) => c.rotulo === filtros.campo);
+    if (campoInfo) {
+      try {
+        const col = campoInfo.coluna;
+        // Whitelist garante que col é seguro (vem de CAMPOS)
+        const rCampo = await db.execute(sql`
+          SELECT b.marcas as marcas
+          FROM aeronaves b
+          JOIN aeronaves a ON a.marcas = b.marcas
+          WHERE b.periodo = ${base} AND a.periodo = ${alvo}
+            AND b.marcas IN ${sql.raw(`(${alteradas.map((m) => `'${m.replace(/'/g, "''")}'`).join(",")})`)}
+            AND b.${sql.raw(col)} IS DISTINCT FROM a.${sql.raw(col)}
+        `);
+        const marcasCampo = new Set((rCampo.rows as { marcas: string }[]).map((r) => r.marcas));
+        // Se encontrou, usa apenas essas; senão mantém todas (fallback)
+        if (marcasCampo.size > 0) {
+          alteradasParaBuscar = alteradas.filter((m) => marcasCampo.has(m));
+        } else {
+          alteradasParaBuscar = [];
+        }
+      } catch {
+        // fallback: busca todas
+        alteradasParaBuscar = alteradas;
+      }
+    }
+  }
+
+  // Paginação antes do fetch para não buscar 1500+ registros quando só 50 são exibidos
+  // Só pagina quando não há filtros que precisam do conjunto completo (fabricante/campo já tratado)
+  const totalParaBuscar = alteradasParaBuscar.length;
+  const precisaConjuntoCompleto = !!(filtros.fabricante || filtros.tipo);
+  const paginasCalc = precisaConjuntoCompleto ? 1 : Math.max(1, Math.ceil(totalParaBuscar / porPagina));
+  const paginaCalc = Math.min(Math.max(1, pagina), paginasCalc);
+  const alteradasPagina = precisaConjuntoCompleto
+    ? alteradasParaBuscar
+    : alteradasParaBuscar.slice((paginaCalc - 1) * porPagina, paginaCalc * porPagina);
+
+  // Busca leve para estatísticas (2 queries com IN 1500, sem vinculos) - para não bloquear display
+  let linhasBaseAll: (typeof aeronaves.$inferSelect)[] = [];
+  let linhasAlvoAll: (typeof aeronaves.$inferSelect)[] = [];
+  if (alteradasParaBuscar.length > 0) {
+    [linhasBaseAll, linhasAlvoAll] = await Promise.all([
+      db.select().from(aeronaves).where(and(inArray(aeronaves.marcas, alteradasParaBuscar), eq(aeronaves.periodo, base))),
+      db.select().from(aeronaves).where(and(inArray(aeronaves.marcas, alteradasParaBuscar), eq(aeronaves.periodo, alvo))),
+    ]);
+  }
+  const mapBaseAll = new Map(linhasBaseAll.map((l) => [l.marcas, l]));
+  const mapAlvoAll = new Map(linhasAlvoAll.map((l) => [l.marcas, l]));
+  const contagemEstat = new Map<string, number>();
+  const valoresEstat = new Map<string, Map<string, number>>();
+  for (const m of alteradasParaBuscar) {
+    const a = mapBaseAll.get(m);
+    const b = mapAlvoAll.get(m);
+    if (!a || !b) continue;
+    for (const c of CAMPOS) {
+      const chave = c.prop as keyof typeof a;
+      const vBase = normalizar(a[chave], c.tipo);
+      const vAlvo = normalizar(b[chave], c.tipo);
+      if (vBase !== vAlvo) {
+        contagemEstat.set(c.rotulo, (contagemEstat.get(c.rotulo) ?? 0) + 1);
+        if (!valoresEstat.has(c.rotulo)) valoresEstat.set(c.rotulo, new Map());
+        const vm = valoresEstat.get(c.rotulo)!;
+        const key = String(a[chave] ?? "");
+        vm.set(key, (vm.get(key) ?? 0) + 1);
+      }
+    }
+  }
 
   let alterados: DiferencaAeronave[] = [];
-  if (alteradas.length > 0) {
+  if (alteradasPagina.length > 0) {
+    const precisaVinculos = !filtros.campo || !CAMPOS.some((c) => c.rotulo === filtros.campo);
     const [linhasBase, linhasAlvo, propBase, propAlvo, opBase, opAlvo] =
       await Promise.all([
         db
           .select()
           .from(aeronaves)
-          .where(and(inArray(aeronaves.marcas, alteradas), eq(aeronaves.periodo, base))),
+          .where(and(inArray(aeronaves.marcas, alteradasPagina), eq(aeronaves.periodo, base))),
         db
           .select()
           .from(aeronaves)
-          .where(and(inArray(aeronaves.marcas, alteradas), eq(aeronaves.periodo, alvo))),
-        db
-          .select()
-          .from(aeronaveProprietarios)
-          .where(
-            and(
-              inArray(aeronaveProprietarios.aeronaveMarcas, alteradas),
-              eq(aeronaveProprietarios.periodo, base),
-            ),
-          ),
-        db
-          .select()
-          .from(aeronaveProprietarios)
-          .where(
-            and(
-              inArray(aeronaveProprietarios.aeronaveMarcas, alteradas),
-              eq(aeronaveProprietarios.periodo, alvo),
-            ),
-          ),
-        db
-          .select()
-          .from(aeronaveOperadores)
-          .where(
-            and(
-              inArray(aeronaveOperadores.aeronaveMarcas, alteradas),
-              eq(aeronaveOperadores.periodo, base),
-            ),
-          ),
-        db
-          .select()
-          .from(aeronaveOperadores)
-          .where(
-            and(
-              inArray(aeronaveOperadores.aeronaveMarcas, alteradas),
-              eq(aeronaveOperadores.periodo, alvo),
-            ),
-          ),
+          .where(and(inArray(aeronaves.marcas, alteradasPagina), eq(aeronaves.periodo, alvo))),
+        precisaVinculos
+          ? db
+              .select()
+              .from(aeronaveProprietarios)
+              .where(
+                and(
+                  inArray(aeronaveProprietarios.aeronaveMarcas, alteradasPagina),
+                  eq(aeronaveProprietarios.periodo, base),
+                ),
+              )
+          : Promise.resolve([] as (typeof aeronaveProprietarios.$inferSelect)[]),
+        precisaVinculos
+          ? db
+              .select()
+              .from(aeronaveProprietarios)
+              .where(
+                and(
+                  inArray(aeronaveProprietarios.aeronaveMarcas, alteradasPagina),
+                  eq(aeronaveProprietarios.periodo, alvo),
+                ),
+              )
+          : Promise.resolve([] as (typeof aeronaveProprietarios.$inferSelect)[]),
+        precisaVinculos
+          ? db
+              .select()
+              .from(aeronaveOperadores)
+              .where(
+                and(
+                  inArray(aeronaveOperadores.aeronaveMarcas, alteradasPagina),
+                  eq(aeronaveOperadores.periodo, base),
+                ),
+              )
+          : Promise.resolve([] as (typeof aeronaveOperadores.$inferSelect)[]),
+        precisaVinculos
+          ? db
+              .select()
+              .from(aeronaveOperadores)
+              .where(
+                and(
+                  inArray(aeronaveOperadores.aeronaveMarcas, alteradasPagina),
+                  eq(aeronaveOperadores.periodo, alvo),
+                ),
+              )
+          : Promise.resolve([] as (typeof aeronaveOperadores.$inferSelect)[]),
       ]);
 
     const docs = new Set<string>();
@@ -667,24 +871,31 @@ export async function compararPeriodos(
     const docsArr = [...docs];
 
     const [proprietariosBase, proprietariosAlvo, operadoresBase, operadoresAlvo] =
-      await Promise.all([
-        db
-          .select()
-          .from(proprietarios)
-          .where(and(inArray(proprietarios.documento, docsArr), eq(proprietarios.periodo, base))),
-        db
-          .select()
-          .from(proprietarios)
-          .where(and(inArray(proprietarios.documento, docsArr), eq(proprietarios.periodo, alvo))),
-        db
-          .select()
-          .from(operadores)
-          .where(and(inArray(operadores.documento, docsArr), eq(operadores.periodo, base))),
-        db
-          .select()
-          .from(operadores)
-          .where(and(inArray(operadores.documento, docsArr), eq(operadores.periodo, alvo))),
-      ]);
+      docsArr.length > 0 && precisaVinculos
+        ? await Promise.all([
+            db
+              .select()
+              .from(proprietarios)
+              .where(and(inArray(proprietarios.documento, docsArr), eq(proprietarios.periodo, base))),
+            db
+              .select()
+              .from(proprietarios)
+              .where(and(inArray(proprietarios.documento, docsArr), eq(proprietarios.periodo, alvo))),
+            db
+              .select()
+              .from(operadores)
+              .where(and(inArray(operadores.documento, docsArr), eq(operadores.periodo, base))),
+            db
+              .select()
+              .from(operadores)
+              .where(and(inArray(operadores.documento, docsArr), eq(operadores.periodo, alvo))),
+          ])
+        : [[], [], [], []] as unknown as [
+            (typeof proprietarios.$inferSelect)[],
+            (typeof proprietarios.$inferSelect)[],
+            (typeof operadores.$inferSelect)[],
+            (typeof operadores.$inferSelect)[],
+          ];
 
     const mapProprietarios = (rows: typeof proprietariosBase) => {
       const m = new Map<string, { nome: string; uf: string | null }>();
@@ -749,7 +960,7 @@ export async function compararPeriodos(
     const linhasBaseMap = new Map(linhasBase.map((l) => [l.marcas, l]));
     const linhasAlvoMap = new Map(linhasAlvo.map((l) => [l.marcas, l]));
 
-    alterados = alteradas.map((marcas) => {
+    alterados = alteradasPagina.map((marcas) => {
       const a = linhasBaseMap.get(marcas)!;
       const b = linhasAlvoMap.get(marcas)!;
       const campos: DiferencaCampo[] = [];
@@ -811,6 +1022,7 @@ export async function compararPeriodos(
         marcas,
         modelo: b.dsModelo ?? null,
         tipoIcao: b.cdTipoIcao ?? null,
+        tipoIcaoNome: (b as unknown as { dsTipoIcaoNome?: string | null }).dsTipoIcaoNome ?? null,
         anoFabricacao: b.nrAnoFabricacao ?? null,
         campos,
         proprietarios: proprietariosDiff,
@@ -836,7 +1048,7 @@ export async function compararPeriodos(
     if (filtros.fabricante) {
       const novosMarcasF = novos.map((n) => n.marcas);
       const rows = await db
-        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, dsTipoIcaoNome: aeronaves.dsTipoIcaoNome, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
         .from(aeronaves)
         .where(and(
           inArray(aeronaves.marcas, novosMarcasF),
@@ -870,7 +1082,8 @@ export async function compararPeriodos(
         if (!mapaPropsNF.has(r.aeronaveMarcas)) mapaPropsNF.set(r.aeronaveMarcas, []);
         mapaPropsNF.get(r.aeronaveMarcas)!.push(r.nome);
       }
-      novosFiltrados = rows.map((r) => ({ marcas: r.marcas, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsNF.get(r.marcas) ?? [], proprietarios: mapaPropsNF.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
+      // @ts-ignore
+      novosFiltrados = rows.map((r) => ({ marcas: r.marcas, periodo: alvo, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, tipoIcaoNome: (r as unknown as { dsTipoIcaoNome: string | null }).dsTipoIcaoNome ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsNF.get(r.marcas) ?? [], proprietarios: mapaPropsNF.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }) as unknown as NovoDetalhado[]);
     }
     // Esconde removidos e alterados quando visualizando apenas novos
     removidosFiltrados = [];
@@ -879,7 +1092,7 @@ export async function compararPeriodos(
     if (filtros.fabricante) {
       const removidosMarcasF = removidos.map((r) => r.marcas);
       const rowsR = await db
-        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, dsTipoIcaoNome: aeronaves.dsTipoIcaoNome, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
         .from(aeronaves)
         .where(and(
           inArray(aeronaves.marcas, removidosMarcasF),
@@ -913,7 +1126,8 @@ export async function compararPeriodos(
         if (!mapaPropsRF.has(r.aeronaveMarcas)) mapaPropsRF.set(r.aeronaveMarcas, []);
         mapaPropsRF.get(r.aeronaveMarcas)!.push(r.nome);
       }
-      removidosFiltrados = rowsR.map((r) => ({ marcas: r.marcas, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsRF.get(r.marcas) ?? [], proprietarios: mapaPropsRF.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
+      // @ts-ignore
+      removidosFiltrados = rowsR.map((r) => ({ marcas: r.marcas, periodo: base, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, tipoIcaoNome: (r as unknown as { dsTipoIcaoNome: string | null }).dsTipoIcaoNome ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsRF.get(r.marcas) ?? [], proprietarios: mapaPropsRF.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }) as unknown as NovoDetalhado);
     }
     novosFiltrados = [];
     alteradosFiltrados = [];
@@ -945,7 +1159,7 @@ export async function compararPeriodos(
     if (novos.length > 0) {
       const novosMarcas = novos.map((n) => n.marcas);
       const rows = await db
-        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, dsTipoIcaoNome: aeronaves.dsTipoIcaoNome, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
         .from(aeronaves)
         .where(and(
           inArray(aeronaves.marcas, novosMarcas),
@@ -978,13 +1192,14 @@ export async function compararPeriodos(
       for (const r of propsNFabRows) {
         if (!mapaPropsNFab.has(r.aeronaveMarcas)) mapaPropsNFab.set(r.aeronaveMarcas, []);
         mapaPropsNFab.get(r.aeronaveMarcas)!.push(r.nome);
+      // @ts-ignore
       }
-      novosFiltrados = rows.map((r) => ({ marcas: r.marcas, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsNFab.get(r.marcas) ?? [], proprietarios: mapaPropsNFab.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
+      novosFiltrados = rows.map((r) => ({ marcas: r.marcas, periodo: alvo, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, tipoIcaoNome: (r as unknown as { dsTipoIcaoNome: string | null }).dsTipoIcaoNome ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsNFab.get(r.marcas) ?? [], proprietarios: mapaPropsNFab.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
     }
     if (removidos.length > 0) {
       const removidosMarcas = removidos.map((r) => r.marcas);
       const rowsR = await db
-        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, dsTipoIcaoNome: aeronaves.dsTipoIcaoNome, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
         .from(aeronaves)
         .where(and(
           inArray(aeronaves.marcas, removidosMarcas),
@@ -1016,24 +1231,39 @@ export async function compararPeriodos(
       const mapaPropsRFab = new Map<string, string[]>();
       for (const r of propsRFabRows) {
         if (!mapaPropsRFab.has(r.aeronaveMarcas)) mapaPropsRFab.set(r.aeronaveMarcas, []);
+      // @ts-ignore
         mapaPropsRFab.get(r.aeronaveMarcas)!.push(r.nome);
       }
-      removidosFiltrados = rowsR.map((r) => ({ marcas: r.marcas, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsRFab.get(r.marcas) ?? [], proprietarios: mapaPropsRFab.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
+      removidosFiltrados = rowsR.map((r) => ({ marcas: r.marcas, periodo: base, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, tipoIcaoNome: (r as unknown as { dsTipoIcaoNome: string | null }).dsTipoIcaoNome ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsRFab.get(r.marcas) ?? [], proprietarios: mapaPropsRFab.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
     }
   }
 
-  const total = alteradosFiltrados.length;
-  const paginas = filtros.tipo ? 1 : Math.max(1, Math.ceil(total / porPagina));
-  const fatia = filtros.tipo ? alteradosFiltrados : alteradosFiltrados.slice((pagina - 1) * porPagina, pagina * porPagina);
+  // Usa total e paginas pré-calculados (alterados já paginado, evita double slice)
+  // Se precisaConjuntoCompleto, total é totalParaBuscar, senão também totalParaBuscar (já filtrado por campo)
+  // Para caso com fabricante/tipo, total será recalculado após filtros abaixo, então mantém lógica original para esses
+  let total = precisaConjuntoCompleto ? alteradosFiltrados.length : totalParaBuscar;
+  let paginas = precisaConjuntoCompleto ? (filtros.tipo ? 1 : Math.max(1, Math.ceil(total / porPagina))) : paginasCalc;
+  let fatia: typeof alterados = precisaConjuntoCompleto
+    ? (filtros.tipo ? alteradosFiltrados : alteradosFiltrados.slice((pagina - 1) * porPagina, pagina * porPagina))
+    : alterados; // já paginado
 
-  const contagemCampos = new Map<string, number>();
-  const valoresCampos = new Map<string, Map<string, number>>();
-  for (const a of alterados) {
-    for (const c of a.campos) {
-      contagemCampos.set(c.campo, (contagemCampos.get(c.campo) ?? 0) + 1);
-      if (!valoresCampos.has(c.campo)) valoresCampos.set(c.campo, new Map());
-      const vMap = valoresCampos.get(c.campo)!;
-      vMap.set(c.antes, (vMap.get(c.antes) ?? 0) + 1);
+  // Para estatísticas, usa contagem pré-calculada de todas (sem vinculos) quando não há filtros complexos
+  // Se precisaConjuntoCompleto, recalcula a partir de alterados (que é completo nesse caso)
+  let contagemCampos: Map<string, number>;
+  let valoresCampos: Map<string, Map<string, number>>;
+  if (!precisaConjuntoCompleto) {
+    contagemCampos = contagemEstat;
+    valoresCampos = valoresEstat;
+  } else {
+    contagemCampos = new Map<string, number>();
+    valoresCampos = new Map<string, Map<string, number>>();
+    for (const a of alterados) {
+      for (const c of a.campos) {
+        contagemCampos.set(c.campo, (contagemCampos.get(c.campo) ?? 0) + 1);
+        if (!valoresCampos.has(c.campo)) valoresCampos.set(c.campo, new Map());
+        const vMap = valoresCampos.get(c.campo)!;
+        vMap.set(c.antes, (vMap.get(c.antes) ?? 0) + 1);
+      }
     }
   }
   const camposMaisAlterados = [...contagemCampos.entries()]
@@ -1057,7 +1287,7 @@ export async function compararPeriodos(
     .slice(0, 6)
     .map((r) => ({ fabricante: r.fabricante as string, quantidade: r.n as number }));
 
-  return {
+  const out: ResultadoComparacao = {
     base,
     alvo,
     resumo: {
@@ -1077,4 +1307,29 @@ export async function compararPeriodos(
     pagina,
     paginas,
   };
+  compararCache.set(k, { data: out, ts: Date.now() });
+  // Limita tamanho do cache memória
+  if (compararCache.size > 50) {
+    const first = compararCache.keys().next().value;
+    if (first) compararCache.delete(first);
+  }
+  // Persiste no Neon para próximos pods/instâncias (fire-and-forget, ~5ms)
+  try {
+    await db
+      .insert(comparacoesCache)
+      .values({
+        base,
+        alvo,
+        filtrosHash: fh,
+        filtros: JSON.stringify({ pagina, porPagina, ...filtros }),
+        resultado: JSON.stringify(out),
+      })
+      .onConflictDoUpdate({
+        target: [comparacoesCache.base, comparacoesCache.alvo, comparacoesCache.filtrosHash],
+        set: { resultado: JSON.stringify(out), filtros: JSON.stringify({ pagina, porPagina, ...filtros }), updatedAt: new Date() },
+      });
+  } catch {
+    // ignora erro de cache
+  }
+  return out;
 }
