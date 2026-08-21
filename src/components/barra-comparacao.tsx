@@ -17,18 +17,6 @@ export function Barra({
   href?: string;
 }) {
   const pct = maximo > 0 ? Math.round((quantidade / maximo) * 100) : 0;
-  const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
-
-  const handleClick = (e: React.MouseEvent) => {
-    if (!href) return;
-    e.preventDefault();
-    setLoading(true);
-    const id = setInterval(() => setElapsed((v) => v + 30), 30);
-    router.push(href);
-    setTimeout(() => clearInterval(id), 10000);
-  };
 
   const bar = (
     <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
@@ -47,12 +35,6 @@ export function Barra({
       <span className="w-8 shrink-0 text-right text-xs font-bold tabular-nums text-zinc-700 dark:text-zinc-300">
         {quantidade}
       </span>
-      {loading ? (
-        <span className="ml-1 flex items-center gap-1 text-[10px] font-mono tabular-nums text-sky-600 dark:text-sky-400">
-          <span className="h-3 w-3 animate-spin rounded-full border border-sky-200 border-t-sky-600 dark:border-sky-800 dark:border-t-sky-400" />
-          {String(Math.floor(elapsed / 60000)).padStart(2, "0")}:{String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0")}.{(elapsed % 1000).toString().padStart(3, "0")}
-        </span>
-      ) : null}
     </div>
   );
 
@@ -60,7 +42,6 @@ export function Barra({
     return (
       <a
         href={href}
-        onClick={handleClick}
         className="block rounded-lg transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
       >
         {bar}

@@ -16,9 +16,7 @@ export function FormComparar({ periodos, base, alvo }: { periodos: string[]; bas
     const b = String(fd.get("base") ?? "");
     const a = String(fd.get("alvo") ?? "");
     setLoading(true);
-    const id = setInterval(() => setElapsed((v) => v + 30), 30);
     router.push(`/comparar?base=${encodeURIComponent(b)}&alvo=${encodeURIComponent(a)}`);
-    setTimeout(() => clearInterval(id), 10000);
   };
 
   const format = (p: string) => {
@@ -28,15 +26,11 @@ export function FormComparar({ periodos, base, alvo }: { periodos: string[]; bas
   };
 
   if (loading) {
-    const mm = String(Math.floor(elapsed / 60000)).padStart(2, "0");
-    const ss = String(Math.floor((elapsed % 60000) / 1000)).padStart(2, "0");
-    const mmm = String(elapsed % 1000).padStart(3, "0");
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-6">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-zinc-200 border-t-sky-600 dark:border-zinc-700 dark:border-t-sky-400" />
         <p className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Consultando, aguarde..</p>
         <p className="text-xs text-zinc-400">Buscando no Banco de Dados</p>
-        <p className="font-mono text-xs tabular-nums text-zinc-500 dark:text-zinc-400">{mm}:{ss}.{mmm}</p>
       </div>
     );
   }
