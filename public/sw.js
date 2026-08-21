@@ -21,9 +21,22 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  // Nunca cachear /comparar com query params (dados dinâmicos) - sempre vai à rede
+  if (request.url.includes("/comparar") && request.url.includes("?")) {
+    return;
+  }
+
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request).catch(() => caches.match(request)),
+      fetch(request)
+        .then((response) => response)
+        .catch(async () => {
+          const cached = await caches.match(request);
+          if (cached) return cached;
+          // Fallback: tenta cache da home ou retorna erro controlado
+          const fallback = await caches.match("/");
+          return fallback || new Response("Offline - sem cache", { status: 503, statusText: "Offline" });
+        }),
     );
     return;
   }
