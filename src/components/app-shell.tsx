@@ -9,9 +9,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const sessao = await obterSessao();
 
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col pb-20 sm:max-w-3xl sm:pb-8">
+    <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col pb-20 sm:max-w-3xl sm:pb-8 lg:max-w-6xl xl:max-w-7xl 2xl:max-w-[100rem]">
       <header className="sticky top-0 z-10 border-b border-zinc-200/60 bg-white/75 backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/75">
-        <div className="flex h-14 items-center justify-between gap-2 px-4">
+        <div className="mx-auto flex h-14 max-w-lg items-center justify-between gap-2 px-4 sm:max-w-3xl lg:max-w-6xl xl:max-w-7xl 2xl:max-w-[100rem]">
           <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-lg shadow-sky-600/30">
               <Plane className="h-4.5 w-4.5" />
@@ -45,7 +45,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="flex-1 px-4 py-4">{children}</main>
+      <main className="flex-1 px-4 py-4 sm:px-6 lg:px-8">{children}</main>
       <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-zinc-200/80 bg-background/90 backdrop-blur-md dark:border-zinc-800 sm:hidden">
         <div className="mx-auto flex h-16 max-w-lg items-stretch">
           <Link

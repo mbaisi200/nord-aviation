@@ -2,17 +2,21 @@ import Link from "next/link";
 import {
   ArrowLeftRight,
   ArrowRight,
-  CheckCircle2,
-  FileCode2,
+  FileSpreadsheet,
   GitCompare,
-  MinusCircle,
-  PlusCircle,
   Printer,
-  RefreshCw,
   Search,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
+import { VerTodosButton } from "@/components/ver-todos-button";
 import { AppShell } from "@/components/app-shell";
 import { Badge, Button, Card, LinkButton } from "@/components/ui";
+import { Barra } from "@/components/barra-comparacao";
+import { CardResumo } from "@/components/card-resumo-comparacao";
+import { ModalRelatorio } from "@/components/modal-relatorio";
+import { situacaoLabel } from "@/lib/aeronave";
+import { traduzirIcao } from "@/lib/icao-types";
 import {
   compararMatricula,
   compararPeriodos,
@@ -24,6 +28,32 @@ export const metadata = {
   title: "Comparar períodos do RAB",
 };
 
+function formatarRegistro(marcas: string, modelo: string | null, tipoIcao: string | null, operadores?: string[], proprietarios?: string[], anoFabricacao?: number | null, fabricante?: string | null): React.ReactNode {
+  const icao = traduzirIcao(tipoIcao);
+  const detalhes = [modelo, fabricante, icao && icao !== modelo ? `(${icao})` : null, anoFabricacao ? String(anoFabricacao) : null].filter(Boolean).join(" ");
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="font-mono font-bold tracking-wider">{marcas}</span>
+      {detalhes ? (
+        <span className="text-xs text-purple-500 dark:text-purple-400">{detalhes}</span>
+      ) : null}
+      {proprietarios && proprietarios.length > 0 ? (
+        <span className="text-xs text-zinc-400">· {proprietarios.join(", ")}</span>
+      ) : null}
+      {operadores && operadores.length > 0 ? (
+        <span className="text-xs text-zinc-400">· {operadores.join(", ")}</span>
+      ) : null}
+    </span>
+  );
+}
+
+function decodificarValor(campo: string, valor: string): string {
+  if (campo === "Status da Aeronave" && valor && valor !== "—") {
+    return situacaoLabel(valor);
+  }
+  return valor;
+}
+
 function formatarPeriodo(p: string): string {
   const [ano, mes] = p.split("-");
   const meses = [
@@ -31,39 +61,6 @@ function formatarPeriodo(p: string): string {
     "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
   ];
   return `${meses[Number(mes) - 1]} de ${ano}`;
-}
-
-function Barra({
-  rotulo,
-  quantidade,
-  maximo,
-  cor,
-}: {
-  rotulo: string;
-  quantidade: number;
-  maximo: number;
-  cor: string;
-}) {
-  const pct = maximo > 0 ? Math.round((quantidade / maximo) * 100) : 0;
-  return (
-    <div className="flex items-center gap-2">
-      <span
-        className="w-24 shrink-0 truncate text-xs text-zinc-600 dark:text-zinc-400"
-        title={rotulo}
-      >
-        {rotulo}
-      </span>
-      <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-        <div
-          className={`h-full rounded-full ${cor}`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="w-8 shrink-0 text-right text-xs font-bold tabular-nums text-zinc-700 dark:text-zinc-300">
-        {quantidade}
-      </span>
-    </div>
-  );
 }
 
 export default async function CompararPage({
@@ -77,6 +74,22 @@ export default async function CompararPage({
     matricula?: string;
     pb?: string;
     pa?: string;
+    campo?: string;
+    fabricante?: string;
+    tipo?: string;
+    relatorio?: string;
+    // Filtros de aeronave
+    modelo?: string;
+    situacao?: string;
+    tpMotor?: string;
+    qtMotor?: string;
+    tpPouso?: string;
+    tpCa?: string;
+    cfOperacional?: string;
+    categoria?: string;
+    tpOperacao?: string;
+    anoDe?: string;
+    anoAte?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -86,6 +99,7 @@ export default async function CompararPage({
   const alvo = params.alvo && periodos.includes(params.alvo) ? params.alvo : undefined;
   const pagina = Math.max(1, Number(params.pagina ?? 1) || 1);
   const imprimir = params.imprimir === "1";
+  const abrirRelatorio = params.relatorio === "1" && !imprimir;
 
   const matricula =
     params.matricula && /^[a-zA-Z0-9-]+$/.test(params.matricula)
@@ -99,9 +113,47 @@ export default async function CompararPage({
       : null;
 
   const temComparacao = base && alvo;
+  const campoFiltro = params.campo || undefined;
+  const fabricanteFiltro = params.fabricante || undefined;
+  const tipoFiltro = params.tipo === "novos" || params.tipo === "removidos" || params.tipo === "alterados" ? params.tipo : undefined;
+  const tipoLabelMap: Record<string, string> = { novos: "Novos", removidos: "Removidos", alterados: "Alterados" };
+  const temFiltroDrillDown = !!(campoFiltro || fabricanteFiltro || tipoFiltro);
+
+  // Filtros de aeronave (aplicam-se a ambos os períodos)
+  const aeroFiltros = {
+    modelo: params.modelo || undefined,
+    situacao: params.situacao || undefined,
+    tpMotor: params.tpMotor || undefined,
+    qtMotor: params.qtMotor || undefined,
+    tpPouso: params.tpPouso || undefined,
+    tpCa: params.tpCa || undefined,
+    cfOperacional: params.cfOperacional || undefined,
+    categoria: params.categoria || undefined,
+    tpOperacao: params.tpOperacao || undefined,
+    anoDe: params.anoDe || undefined,
+    anoAte: params.anoAte || undefined,
+  };
+  const temFiltrosAero = Object.values(aeroFiltros).some(Boolean);
+
+  // Quando relatorio=1, busca TODOS os registros filtrados (sem paginação)
+  const resultadoRelatorio =
+    abrirRelatorio && base && alvo && temFiltroDrillDown
+      ? await compararPeriodos(base, alvo, 1, 1000000, {
+          campo: campoFiltro,
+          fabricante: fabricanteFiltro,
+          tipo: tipoFiltro,
+          ...aeroFiltros,
+        })
+      : null;
+
   const resultado =
     base && alvo
-      ? await compararPeriodos(base, alvo, imprimir ? 1 : pagina, imprimir ? 1000000 : 50)
+      ? await compararPeriodos(base, alvo, imprimir ? 1 : pagina, imprimir ? 1000000 : 50, {
+          campo: !abrirRelatorio ? campoFiltro : undefined,
+          fabricante: !abrirRelatorio ? fabricanteFiltro : undefined,
+          tipo: !abrirRelatorio ? tipoFiltro : undefined,
+          ...aeroFiltros,
+        })
       : null;
 
   return (
@@ -156,6 +208,213 @@ export default async function CompararPage({
               <Button type="submit">
                 <GitCompare className="h-4 w-4" />
                 Comparar
+              </Button>
+            </form>
+          </Card>
+        ) : null}
+
+        {/* Filtros de aeronave */}
+        {!imprimir ? (
+          <Card className="p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-zinc-400" />
+              <span className="text-sm font-semibold">Filtros de aeronave</span>
+              {temFiltrosAero ? (
+                <Link
+                  href={`/comparar?base=${params.base ?? ""}&alvo=${params.alvo ?? ""}`}
+                  className="ml-auto inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-100 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
+                >
+                  <X className="h-3 w-3" />
+                  Limpar filtros
+                </Link>
+              ) : null}
+            </div>
+            <form method="GET" action="/comparar" className="flex flex-col gap-3">
+              <input type="hidden" name="base" value={String(params.base ?? "")} />
+              <input type="hidden" name="alvo" value={String(params.alvo ?? "")} />
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Fabricante
+                  <input
+                    name="fabricante"
+                    defaultValue={fabricanteFiltro ?? ""}
+                    placeholder="Ex.: EMBRAER"
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Modelo
+                  <input
+                    name="modelo"
+                    defaultValue={params.modelo ?? ""}
+                    placeholder="Ex.: EMB 190"
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Situação
+                  <select
+                    name="situacao"
+                    defaultValue={params.situacao ?? ""}
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="">Todas</option>
+                    <option value="N">Situação normal</option>
+                    <option value="R">Reserva de marcas</option>
+                    <option value="S">CA suspenso</option>
+                    <option value="C">CA cancelado</option>
+                    <option value="V">CA vencido</option>
+                    <option value="X">Aeronave interditada</option>
+                    <option value="U">Ultraleve (normal)</option>
+                    <option value="Z">Experimental (normal)</option>
+                    <option value="P">Situação punitiva</option>
+                    <option value="M">Matrícula cancelada</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Tipo de motor
+                  <select
+                    name="tpMotor"
+                    defaultValue={params.tpMotor ?? ""}
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="">Todos</option>
+                    <option value="MOTOR A PISTÃO">MOTOR A PISTÃO</option>
+                    <option value="MOTOR CONVENCIONAL">MOTOR CONVENCIONAL</option>
+                    <option value="MOTOR TURBOHELICE">MOTOR TURBOHELICE</option>
+                    <option value="MOTOR JATO/TURBOFAN">MOTOR JATO/TURBOFAN</option>
+                    <option value="MOTOR TURBOEIXO">MOTOR TURBOEIXO</option>
+                    <option value="MOTOR ELETRICO">MOTOR ELETRICO</option>
+                    <option value="SEM MOTOR">SEM MOTOR</option>
+                    <option value="DRONE">DRONE</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Qtde. de motores
+                  <select
+                    name="qtMotor"
+                    defaultValue={params.qtMotor ?? ""}
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="">Todas</option>
+                    <option value="0">0</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Tipo de pouso
+                  <select
+                    name="tpPouso"
+                    defaultValue={params.tpPouso ?? ""}
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="">Todos</option>
+                    <option value="POUSO CONVENCIONAL">POUSO CONVENCIONAL</option>
+                    <option value="HELICOPTERO">HELICOPTERO</option>
+                    <option value="ANFIBIO">ANFIBIO</option>
+                    <option value="GIROCOPTERO">GIROCOPTERO</option>
+                    <option value="POUSO EM TERRA">POUSO EM TERRA</option>
+                    <option value="POUSO NA AGUA">POUSO NA AGUA</option>
+                    <option value="DRONE (RPAS)">DRONE (RPAS)</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Tipo de CA
+                  <select
+                    name="tpCa"
+                    defaultValue={params.tpCa ?? ""}
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="">Todos</option>
+                    <option value="CA PADRAO">CA PADRAO</option>
+                    <option value="CAVE">CAVE</option>
+                    <option value="AEV">AEV</option>
+                    <option value="CEALE">CEALE</option>
+                    <option value="APO">APO</option>
+                    <option value="CAER">CAER</option>
+                    <option value="APO+CAVE">APO+CAVE</option>
+                    <option value="CAARF">CAARF</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  CF operacional
+                  <select
+                    name="cfOperacional"
+                    defaultValue={params.cfOperacional ?? ""}
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="">Todos</option>
+                    <option value="RBAC 91">RBAC 91</option>
+                    <option value="RBAC 135">RBAC 135</option>
+                    <option value="RBAC 121">RBAC 121</option>
+                    <option value="RBAC E94">RBAC E94</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Categoria de homologação
+                  <select
+                    name="categoria"
+                    defaultValue={params.categoria ?? ""}
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="">Todas</option>
+                    <option value="NORMAL">NORMAL</option>
+                    <option value="TRANSPORTE">TRANSPORTE</option>
+                    <option value="RESTRITA">RESTRITA</option>
+                    <option value="UTILIDADE">UTILIDADE</option>
+                    <option value="RPAS AUTORIZADO">RPAS AUTORIZADO</option>
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium">
+                  Tipo de operação
+                  <select
+                    name="tpOperacao"
+                    defaultValue={params.tpOperacao ?? ""}
+                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  >
+                    <option value="">Todos</option>
+                    <option value="PRIVADO">PRIVADO</option>
+                    <option value="PRIVADA">PRIVADA</option>
+                    <option value="PUBLICO">PUBLICO</option>
+                    <option value="PUBLICO ESTADUAL">PUBLICO ESTADUAL</option>
+                    <option value="PUBLICO FEDERAL">PUBLICO FEDERAL</option>
+                    <option value="PUBLICO MUNICIPAL">PUBLICO MUNICIPAL</option>
+                    <option value="PUBLICO DISTRITO FEDERAL">PUBLICO DISTRITO FEDERAL</option>
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="flex flex-col gap-1.5 text-sm font-medium">
+                    Ano de fabricação de
+                    <input
+                      name="anoDe"
+                      type="number"
+                      min={1900}
+                      max={2100}
+                      defaultValue={params.anoDe ?? ""}
+                      placeholder="Ex.: 2000"
+                      className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-sm font-medium">
+                    até
+                    <input
+                      name="anoAte"
+                      type="number"
+                      min={1900}
+                      max={2100}
+                      defaultValue={params.anoAte ?? ""}
+                      placeholder="Ex.: 2020"
+                      className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                    />
+                  </label>
+                </div>
+              </div>
+              <Button type="submit">
+                <SlidersHorizontal className="h-4 w-4" />
+                Aplicar filtros
               </Button>
             </form>
           </Card>
@@ -319,6 +578,15 @@ export default async function CompararPage({
                 <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-medium text-sky-700 dark:bg-sky-950 dark:text-sky-300">
                   {formatarPeriodo(resultado.alvo)}
                 </span>
+                {temFiltroDrillDown ? (
+                  <>
+                    <span className="text-zinc-300 dark:text-zinc-600">·</span>
+                    <VerTodosButton
+                      href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}`}
+                      label={campoFiltro ? campoFiltro : fabricanteFiltro ? fabricanteFiltro : tipoLabelMap[tipoFiltro ?? ""]}
+                    />
+                  </>
+                ) : null}
               </div>
               {!imprimir ? (
                 <div className="flex gap-2 print:hidden">
@@ -330,60 +598,48 @@ export default async function CompararPage({
                     Exportar PDF
                   </LinkButton>
                   <LinkButton
-                    href={`/api/exportar?base=${resultado.base}&alvo=${resultado.alvo}&formato=xml`}
+                    href={`/api/exportar?base=${resultado.base}&alvo=${resultado.alvo}`}
                     variant="secondary"
                   >
-                    <FileCode2 className="h-4 w-4" />
-                    Exportar XML
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Exportar XLS
                   </LinkButton>
                 </div>
               ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <a href="#novos" className="group">
-                <Card className="flex flex-col items-center gap-1 p-4 text-center transition-all group-hover:-translate-y-0.5 group-hover:border-emerald-400 group-hover:shadow-lg">
-                  <PlusCircle className="h-5 w-5 text-emerald-500" />
-                  <span className="text-2xl font-bold tabular-nums">
-                    {resultado.resumo.novos.toLocaleString("pt-BR")}
-                  </span>
-                  <span className="text-xs text-zinc-500">
-                    registros novos{" "}
-                    <span className="text-emerald-500">↓</span>
-                  </span>
-                </Card>
-              </a>
-              <a href="#removidos" className="group">
-                <Card className="flex flex-col items-center gap-1 p-4 text-center transition-all group-hover:-translate-y-0.5 group-hover:border-red-400 group-hover:shadow-lg">
-                  <MinusCircle className="h-5 w-5 text-red-500" />
-                  <span className="text-2xl font-bold tabular-nums">
-                    {resultado.resumo.removidos.toLocaleString("pt-BR")}
-                  </span>
-                  <span className="text-xs text-zinc-500">
-                    registros removidos{" "}
-                    <span className="text-red-500">↓</span>
-                  </span>
-                </Card>
-              </a>
-              <a href="#alterados" className="group">
-                <Card className="flex flex-col items-center gap-1 p-4 text-center transition-all group-hover:-translate-y-0.5 group-hover:border-amber-400 group-hover:shadow-lg">
-                  <RefreshCw className="h-5 w-5 text-amber-500" />
-                  <span className="text-2xl font-bold tabular-nums">
-                    {resultado.resumo.alterados.toLocaleString("pt-BR")}
-                  </span>
-                  <span className="text-xs text-zinc-500">
-                    registros alterados{" "}
-                    <span className="text-amber-500">↓</span>
-                  </span>
-                </Card>
-              </a>
-              <Card className="flex flex-col items-center gap-1 p-4 text-center">
-                <CheckCircle2 className="h-5 w-5 text-sky-500" />
-                <span className="text-2xl font-bold tabular-nums">
-                  {resultado.resumo.semAlteracao.toLocaleString("pt-BR")}
-                </span>
-                <span className="text-xs text-zinc-500">sem alteração</span>
-              </Card>
+              <CardResumo
+                tipo="novos"
+                icone="plus"
+                cor="text-emerald-500"
+                rotulo="novos"
+                quantidade={resultado.resumo.novos}
+                href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&tipo=novos`}
+              />
+              <CardResumo
+                tipo="removidos"
+                icone="minus"
+                cor="text-red-500"
+                rotulo="removidos"
+                quantidade={resultado.resumo.removidos}
+                href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&tipo=removidos`}
+              />
+              <CardResumo
+                tipo="alterados"
+                icone="refresh"
+                cor="text-amber-500"
+                rotulo="alterados"
+                quantidade={resultado.resumo.alterados}
+                href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&tipo=alterados`}
+              />
+              <CardResumo
+                tipo="sem"
+                icone="check"
+                cor="text-sky-500"
+                rotulo="sem alteração"
+                quantidade={resultado.resumo.semAlteracao}
+              />
             </div>
 
             <section className="flex flex-col gap-3">
@@ -461,6 +717,7 @@ export default async function CompararPage({
                           quantidade={c.quantidade}
                           maximo={resultado.estatisticas.camposMaisAlterados[0].quantidade}
                           cor="bg-amber-400"
+                          href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&campo=${encodeURIComponent(c.rotulo)}`}
                         />
                       ))}
                     </div>
@@ -483,6 +740,7 @@ export default async function CompararPage({
                           quantidade={f.quantidade}
                           maximo={resultado.estatisticas.novosPorFabricante[0].quantidade}
                           cor="bg-emerald-500"
+                          href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&fabricante=${encodeURIComponent(f.fabricante)}&tipo=novos`}
                         />
                       ))}
                     </div>
@@ -507,6 +765,7 @@ export default async function CompararPage({
                           quantidade={f.quantidade}
                           maximo={resultado.estatisticas.removidosPorFabricante[0].quantidade}
                           cor="bg-red-500"
+                          href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&fabricante=${encodeURIComponent(f.fabricante)}&tipo=removidos`}
                         />
                       ))}
                     </div>
@@ -517,22 +776,38 @@ export default async function CompararPage({
 
             <section id="novos" className="flex scroll-mt-24 flex-col gap-2">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
-                Registros novos ({resultado.resumo.novos})
+                Registros novos ({resultado.novos.length})
               </h2>
               {resultado.novos.length === 0 ? (
                 <p className="text-sm text-zinc-500">Nenhum registro novo.</p>
               ) : (
                 <Card className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {resultado.novos.map((m) => (
+                  {resultado.novos.map((r) => (
                     <Link
-                      key={m}
-                      href={`/aeronaves/${m}`}
-                      className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-sky-50/50 dark:hover:bg-sky-950/20"
+                      key={r.marcas}
+                      href={`/aeronaves/${r.marcas}`}
+                      className="flex flex-col gap-1 px-4 py-3 transition-colors hover:bg-sky-50/50 dark:hover:bg-sky-950/20"
                     >
-                      <span className="font-mono font-bold tracking-wider text-emerald-600 dark:text-emerald-400">
-                        {m}
-                      </span>
-                      <span className="text-xs text-zinc-400">ver detalhes →</span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-base font-bold tracking-wider text-emerald-600 dark:text-emerald-400">
+                            {r.marcas}
+                          </span>
+                          {r.modelo ? (
+                            <span className="text-sm font-medium text-purple-600 dark:text-purple-400">{r.modelo}</span>
+                          ) : null}
+                          {r.fabricante ? (
+                            <span className="text-xs text-zinc-400">· {r.fabricante}</span>
+                          ) : null}
+                        </div>
+                        <span className="text-xs text-zinc-400">ver detalhes →</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        {r.tipoIcao ? <span>ICAO: {traduzirIcao(r.tipoIcao)}</span> : null}
+                        {r.anoFabricacao ? <span>Ano: {r.anoFabricacao}</span> : null}
+                        {r.proprietarios.length > 0 ? <span>Prop.: {r.proprietarios.join(", ")}</span> : null}
+                        {r.operadores.length > 0 ? <span>Op.: {r.operadores.join(", ")}</span> : null}
+                      </div>
                     </Link>
                   ))}
                 </Card>
@@ -541,20 +816,34 @@ export default async function CompararPage({
 
             <section id="removidos" className="flex scroll-mt-24 flex-col gap-2">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
-                Registros removidos ({resultado.resumo.removidos})
+                Registros removidos ({resultado.removidos.length})
               </h2>
               {resultado.removidos.length === 0 ? (
                 <p className="text-sm text-zinc-500">Nenhum registro removido.</p>
               ) : (
                 <Card className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {resultado.removidos.map((m) => (
+                  {resultado.removidos.map((r) => (
                     <div
-                      key={m}
-                      className="flex items-center justify-between px-4 py-2.5"
+                      key={r.marcas}
+                      className="flex flex-col gap-1 px-4 py-3"
                     >
-                      <span className="font-mono font-bold tracking-wider text-red-500 line-through">
-                        {m}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-base font-bold tracking-wider text-red-500">
+                          {r.marcas}
+                        </span>
+                        {r.modelo ? (
+                          <span className="text-sm font-medium text-purple-600 dark:text-purple-400">{r.modelo}</span>
+                        ) : null}
+                        {r.fabricante ? (
+                          <span className="text-xs text-zinc-400">· {r.fabricante}</span>
+                        ) : null}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+                        {r.tipoIcao ? <span>ICAO: {traduzirIcao(r.tipoIcao)}</span> : null}
+                        {r.anoFabricacao ? <span>Ano: {r.anoFabricacao}</span> : null}
+                        {r.proprietarios.length > 0 ? <span>Prop.: {r.proprietarios.join(", ")}</span> : null}
+                        {r.operadores.length > 0 ? <span>Op.: {r.operadores.join(", ")}</span> : null}
+                      </div>
                     </div>
                   ))}
                 </Card>
@@ -563,7 +852,7 @@ export default async function CompararPage({
 
             <section id="alterados" className="flex scroll-mt-24 flex-col gap-2">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
-                Registros alterados ({resultado.resumo.alterados})
+                Registros alterados ({resultado.alterados.length})
               </h2>
               {resultado.alterados.length === 0 ? (
                 <p className="text-sm text-zinc-500">
@@ -574,12 +863,14 @@ export default async function CompararPage({
                   {resultado.alterados.map((d) => (
                     <Card key={d.marcas} className="overflow-hidden">
                       <div className="flex items-center justify-between border-b border-zinc-100 bg-zinc-50/50 px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-900/50">
-                        <Link
-                          href={`/aeronaves/${d.marcas}`}
-                          className="font-mono text-base font-bold tracking-wider text-sky-600 hover:underline dark:text-sky-400"
-                        >
-                          {d.marcas}
-                        </Link>
+                        <div className="flex items-center gap-3">
+                          <Link
+                            href={`/aeronaves/${d.marcas}`}
+                            className="text-base text-sky-600 hover:underline dark:text-sky-400"
+                          >
+                            {formatarRegistro(d.marcas, d.modelo, d.tipoIcao, undefined, undefined, d.anoFabricacao)}
+                          </Link>
+                        </div>
                         <Badge>{d.campos.length} alteração(ões)</Badge>
                       </div>
                       <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -593,13 +884,13 @@ export default async function CompararPage({
                             </span>
                             <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-3">
                               <span className="text-zinc-400 line-through decoration-red-400/60">
-                                {c.antes}
+                                {decodificarValor(c.campo, c.antes)}
                               </span>
                               <span className="text-zinc-300 dark:text-zinc-600">
                                 →
                               </span>
                               <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                                {c.depois}
+                                {decodificarValor(c.campo, c.depois)}
                               </span>
                             </div>
                           </div>
@@ -632,6 +923,165 @@ export default async function CompararPage({
           </div>
         ) : null}
       </div>
+
+      {/* Modal de relatório drill-down */}
+      {abrirRelatorio && resultadoRelatorio && temFiltroDrillDown && base && alvo ? (
+        <ModalRelatorio
+          titulo={
+            campoFiltro
+              ? `Campo: ${campoFiltro}`
+              : fabricanteFiltro
+                ? `${fabricanteFiltro} — ${tipoLabelMap[tipoFiltro ?? ""] || "Alterados"}`
+                : `Registros ${tipoLabelMap[tipoFiltro ?? ""]}`
+          }
+          subtitulo={`${formatarPeriodo(base)} → ${formatarPeriodo(alvo)}`}
+          base={base}
+          alvo={alvo}
+        >
+          {/* Relatório de campo específico */}
+          {campoFiltro ? (
+            <div>
+              <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+                {resultadoRelatorio.alterados.length} registro(s) com alteração em <strong>{campoFiltro}</strong>
+              </p>
+              {resultadoRelatorio.alterados.length === 0 ? (
+                <p className="text-sm text-zinc-500">Nenhum registro encontrado.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Matrícula</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Valor Antes</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Valor Depois</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultadoRelatorio.alterados.map((d) => {
+                      const campo = d.campos.find((c) => c.campo === campoFiltro);
+                      if (!campo) return null;
+                      return (
+                        <tr key={d.marcas} className="border-b border-zinc-100 dark:border-zinc-800">
+                          <td className="px-3 py-2">
+                            <span className="text-sky-600 dark:text-sky-400">
+                              {formatarRegistro(d.marcas, d.modelo, d.tipoIcao, undefined, undefined, d.anoFabricacao)}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-red-500 line-through decoration-red-400/60">{decodificarValor(campoFiltro, campo.antes)}</td>
+                          <td className="px-3 py-2 font-medium text-emerald-600 dark:text-emerald-400">{decodificarValor(campoFiltro, campo.depois)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ) : tipoFiltro === "novos" ? (
+            <div>
+              <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+                {resultadoRelatorio.novos.length} registro(s) novos{fabricanteFiltro ? ` de ${fabricanteFiltro}` : ""}
+              </p>
+              {resultadoRelatorio.novos.length === 0 ? (
+                <p className="text-sm text-zinc-500">Nenhum registro encontrado.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Matrícula</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Modelo</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Fabricante</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">ICAO</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Ano</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Proprietários</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Operadores</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultadoRelatorio.novos.map((r) => (
+                      <tr key={r.marcas} className="border-b border-zinc-100 dark:border-zinc-800">
+                        <td className="px-3 py-2 font-mono font-bold text-emerald-600 dark:text-emerald-400">{r.marcas}</td>
+                        <td className="px-3 py-2 font-medium text-purple-600 dark:text-purple-400">{r.modelo ?? "—"}</td>
+                        <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{r.fabricante ?? "—"}</td>
+                        <td className="px-3 py-2 text-zinc-500">{traduzirIcao(r.tipoIcao) || "—"}</td>
+                        <td className="px-3 py-2 text-zinc-500">{r.anoFabricacao ? r.anoFabricacao : "—"}</td>
+                        <td className="px-3 py-2 text-zinc-500">{r.proprietarios.length > 0 ? r.proprietarios.join(", ") : "—"}</td>
+                        <td className="px-3 py-2 text-zinc-500">{r.operadores.length > 0 ? r.operadores.join(", ") : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ) : tipoFiltro === "removidos" ? (
+            <div>
+              <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+                {resultadoRelatorio.removidos.length} registro(s) removidos{fabricanteFiltro ? ` de ${fabricanteFiltro}` : ""}
+              </p>
+              {resultadoRelatorio.removidos.length === 0 ? (
+                <p className="text-sm text-zinc-500">Nenhum registro encontrado.</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-700">
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Matrícula</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Modelo / Fabricante</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">ICAO</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Ano</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Proprietários</th>
+                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Operadores</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {resultadoRelatorio.removidos.map((r) => (
+                      <tr key={r.marcas} className="border-b border-zinc-100 dark:border-zinc-800">
+                        <td className="px-3 py-2 font-mono font-bold text-red-500">{r.marcas}</td>
+                        <td className="px-3 py-2">
+                          <span className="font-medium text-purple-600 dark:text-purple-400">{r.modelo ?? "—"}</span>
+                          {r.fabricante ? <span className="ml-1 text-xs text-zinc-500">· {r.fabricante}</span> : null}
+                        </td>
+                        <td className="px-3 py-2 text-zinc-500">{traduzirIcao(r.tipoIcao) || "—"}</td>
+                        <td className="px-3 py-2 text-zinc-500">{r.anoFabricacao ? r.anoFabricacao : "—"}</td>
+                        <td className="px-3 py-2 text-zinc-500">{r.proprietarios.length > 0 ? r.proprietarios.join(", ") : "—"}</td>
+                        <td className="px-3 py-2 text-zinc-500">{r.operadores.length > 0 ? r.operadores.join(", ") : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ) : (
+            <div>
+              <p className="mb-3 text-sm text-zinc-600 dark:text-zinc-400">
+                {resultadoRelatorio.alterados.length} registro(s) alterados{fabricanteFiltro ? ` de ${fabricanteFiltro}` : ""}
+              </p>
+              {resultadoRelatorio.alterados.length === 0 ? (
+                <p className="text-sm text-zinc-500">Nenhum registro encontrado.</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {resultadoRelatorio.alterados.map((d) => (
+                    <div key={d.marcas} className="rounded-xl border border-zinc-200 dark:border-zinc-700">
+                      <div className="border-b border-zinc-100 bg-zinc-50/50 px-4 py-2 dark:border-zinc-800 dark:bg-zinc-900/50">
+                        <span className="text-sm text-sky-600 dark:text-sky-400">
+                          {formatarRegistro(d.marcas, d.modelo, d.tipoIcao, undefined, undefined, d.anoFabricacao)}
+                        </span>
+                        <Badge className="ml-2">{d.campos.length} alteração(ões)</Badge>
+                      </div>
+                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {d.campos.map((c) => (
+                          <div key={c.campo} className="grid grid-cols-3 gap-2 px-4 py-2 text-sm">
+                            <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">{c.campo}</span>
+                            <span className="text-red-500 line-through decoration-red-400/60">{decodificarValor(c.campo, c.antes)}</span>
+                            <span className="font-medium text-emerald-600 dark:text-emerald-400">{decodificarValor(c.campo, c.depois)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </ModalRelatorio>
+      ) : null}
     </AppShell>
   );
 }

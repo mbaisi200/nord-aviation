@@ -61,6 +61,7 @@ export const aeronaves = pgTable(
     index("idx_aeronaves_cf_operacional").on(t.cfOperacional),
     index("idx_aeronaves_categoria").on(t.dsCategoriaHomologacao),
     index("idx_aeronaves_tp_operacao").on(t.tpOperacao),
+    index("idx_aeronaves_periodo_fabricante").on(t.periodo, t.nmFabricante),
   ],
 );
 
@@ -120,6 +121,8 @@ export const aeronaveProprietarios = pgTable(
       columns: [t.aeronaveMarcas, t.periodo, t.proprietarioDocumento],
     }),
     index("idx_aeronave_prop_proprietario").on(t.proprietarioDocumento),
+    index("idx_aeronave_prop_periodo").on(t.periodo),
+    index("idx_aeronave_prop_marcas_periodo").on(t.aeronaveMarcas, t.periodo),
   ],
 );
 
@@ -136,6 +139,8 @@ export const aeronaveOperadores = pgTable(
       columns: [t.aeronaveMarcas, t.periodo, t.operadorDocumento],
     }),
     index("idx_aeronave_op_operador").on(t.operadorDocumento),
+    index("idx_aeronave_op_periodo").on(t.periodo),
+    index("idx_aeronave_op_marcas_periodo").on(t.aeronaveMarcas, t.periodo),
   ],
 );
 

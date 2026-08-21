@@ -126,7 +126,7 @@ export default async function ListaAeronavesPage({
             </p>
           </Card>
         ) : (
-          <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {registros.map((a) => (
               <Link key={a.marcas} href={`/aeronaves/${a.marcas}`}>
                 <Card className="flex flex-col gap-2 p-4 transition-colors hover:border-sky-400">

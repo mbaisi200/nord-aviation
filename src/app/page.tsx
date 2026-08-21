@@ -67,7 +67,7 @@ export default async function Home() {
           </div>
         </section>
 
-        <section className="flex flex-col gap-3">
+        <section className="grid grid-cols-1 gap-3 lg:grid-cols-2">
           <Link href="/aeronaves/novo">
             <Card className="flex items-center gap-3 p-4 transition-all hover:-translate-y-0.5 hover:border-sky-400 hover:shadow-lg">
               <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-md shadow-sky-600/25">

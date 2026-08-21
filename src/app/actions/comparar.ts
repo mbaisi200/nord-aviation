@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   aeronaveOperadores,
@@ -37,7 +37,7 @@ const CAMPOS: {
   { coluna: "dt_validade_ca", prop: "dtValidadeCa", rotulo: "Validade CA", tipo: "date" },
   { coluna: "dt_canc", prop: "dtCanc", rotulo: "Cancelamento", tipo: "date" },
   { coluna: "ds_motivo_canc", prop: "dsMotivoCanc", rotulo: "Motivo de cancelamento", tipo: "text" },
-  { coluna: "cd_interdicao", prop: "cdInterdicao", rotulo: "Interdição", tipo: "text" },
+  { coluna: "cd_interdicao", prop: "cdInterdicao", rotulo: "Status da Aeronave", tipo: "text" },  // NOTE: coluna do banco continua cd_interdicao — importações futuras que vierem com o campo CD_INTERDICAO serão mapeadas automaticamente
   { coluna: "ds_gravame", prop: "dsGravame", rotulo: "Gravame", tipo: "text" },
   { coluna: "dt_matricula", prop: "dtMatricula", rotulo: "Data de matrícula", tipo: "date" },
   { coluna: "tp_motor", prop: "tpMotor", rotulo: "Tipo de motor", tipo: "text" },
@@ -109,13 +109,16 @@ export type DiferencaOperadores = {
 
 export type DiferencaAeronave = {
   marcas: string;
+  modelo: string | null;
+  tipoIcao: string | null;
+  anoFabricacao: number | null;
   campos: DiferencaCampo[];
   proprietarios: DiferencaProprietarios;
   operadores: DiferencaOperadores;
 };
 
 export type EstatisticasComparacao = {
-  camposMaisAlterados: { rotulo: string; quantidade: number }[];
+  camposMaisAlterados: { rotulo: string; quantidade: number; valorMaisComum: string }[];
   novosPorFabricante: { fabricante: string; quantidade: number }[];
   removidosPorFabricante: { fabricante: string; quantidade: number }[];
 };
@@ -130,8 +133,8 @@ export type ResultadoComparacao = {
     semAlteracao: number;
   };
   estatisticas: EstatisticasComparacao;
-  novos: string[];
-  removidos: string[];
+  novos: { marcas: string; modelo: string | null; tipoIcao: string | null; fabricante: string | null; operadores: string[]; proprietarios: string[]; anoFabricacao: number | null }[];
+  removidos: { marcas: string; modelo: string | null; tipoIcao: string | null; fabricante: string | null; operadores: string[]; proprietarios: string[]; anoFabricacao: number | null }[];
   alterados: DiferencaAeronave[];
   pagina: number;
   paginas: number;
@@ -372,11 +375,30 @@ export async function compararMatricula(
   };
 }
 
+export type FiltrosComparacao = {
+  campo?: string;
+  fabricante?: string;
+  tipo?: "novos" | "removidos" | "alterados";
+  // Filtros de aeronave (aplicam-se a ambos os períodos)
+  modelo?: string;
+  situacao?: string;
+  tpMotor?: string;
+  qtMotor?: string;
+  tpPouso?: string;
+  tpCa?: string;
+  cfOperacional?: string;
+  categoria?: string;
+  tpOperacao?: string;
+  anoDe?: string;
+  anoAte?: string;
+};
+
 export async function compararPeriodos(
   base: string,
   alvo: string,
   pagina = 1,
   porPagina = 50,
+  filtros: FiltrosComparacao = {},
 ): Promise<ResultadoComparacao> {
   await exigirSessao();
   if (!/^\d{4}-\d{2}$/.test(base) || !/^\d{4}-\d{2}$/.test(alvo)) {
@@ -410,20 +432,38 @@ export async function compararPeriodos(
     };
   }
 
+  // Monta cláusulas WHERE para filtros de aeronave
+  const buildFilterWhere = (f: FiltrosComparacao) => {
+    const p: string[] = [];
+    if (f.situacao) p.push(`AND left(coalesce(cd_interdicao, ''), 1) = '${f.situacao.replace(/'/g, "''")}'`);
+    if (f.modelo) p.push(`AND ds_modelo ILIKE '%${f.modelo.replace(/'/g, "''")}%'`);
+    if (f.tpMotor) p.push(`AND tp_motor = '${f.tpMotor.replace(/'/g, "''")}'`);
+    if (f.qtMotor) p.push(`AND qt_motor = ${Number(f.qtMotor)}`);
+    if (f.tpPouso) p.push(`AND tp_pouso = '${f.tpPouso.replace(/'/g, "''")}'`);
+    if (f.tpCa) p.push(`AND tp_ca = '${f.tpCa.replace(/'/g, "''")}'`);
+    if (f.cfOperacional) p.push(`AND cf_operacional = '${f.cfOperacional.replace(/'/g, "''")}'`);
+    if (f.categoria) p.push(`AND ds_categoria_homologacao = '${f.categoria.replace(/'/g, "''")}'`);
+    if (f.tpOperacao) p.push(`AND tp_operacao = '${f.tpOperacao.replace(/'/g, "''")}'`);
+    if (f.anoDe) p.push(`AND nr_ano_fabricacao >= ${Number(f.anoDe)}`);
+    if (f.anoAte) p.push(`AND nr_ano_fabricacao <= ${Number(f.anoAte)}`);
+    return p.join(" ");
+  };
+  const fw = buildFilterWhere(filtros);
+
   const [res, resFab] = await Promise.all([
     db.execute(sql`
     WITH base AS (
       SELECT marcas, md5(CAST(json_build_array(${sql.raw(LISTA_CAMPOS_SQL)}) AS text)) AS h
-      FROM aeronaves WHERE periodo = ${base}
+      FROM aeronaves WHERE periodo = ${base} ${sql.raw(fw)}
     ), alvo AS (
       SELECT marcas, md5(CAST(json_build_array(${sql.raw(LISTA_CAMPOS_SQL)}) AS text)) AS h
-      FROM aeronaves WHERE periodo = ${alvo}
+      FROM aeronaves WHERE periodo = ${alvo} ${sql.raw(fw)}
     )
     SELECT COALESCE(base.marcas, alvo.marcas) AS marcas,
            base.marcas AS base_m,
            alvo.marcas AS alvo_m,
-           (SELECT count(*)::int FROM aeronaves WHERE periodo = ${base}) AS total_base,
-           (SELECT count(*)::int FROM aeronaves WHERE periodo = ${alvo}) AS total_alvo
+           (SELECT count(*)::int FROM aeronaves WHERE periodo = ${base} ${sql.raw(fw)}) AS total_base,
+           (SELECT count(*)::int FROM aeronaves WHERE periodo = ${alvo} ${sql.raw(fw)}) AS total_alvo
     FROM base FULL JOIN alvo USING (marcas)
     WHERE base.h IS DISTINCT FROM alvo.h
        OR base.marcas IS NULL
@@ -431,9 +471,9 @@ export async function compararPeriodos(
   `),
     db.execute(sql`
     WITH base AS (
-      SELECT marcas, nm_fabricante FROM aeronaves WHERE periodo = ${base}
+      SELECT marcas, nm_fabricante FROM aeronaves WHERE periodo = ${base} ${sql.raw(fw)}
     ), alvo AS (
-      SELECT marcas, nm_fabricante FROM aeronaves WHERE periodo = ${alvo}
+      SELECT marcas, nm_fabricante FROM aeronaves WHERE periodo = ${alvo} ${sql.raw(fw)}
     )
     SELECT CASE WHEN base.marcas IS NULL THEN 'novo' ELSE 'removido' END AS tipo,
            COALESCE(NULLIF(TRIM(alvo.nm_fabricante), ''), NULLIF(TRIM(base.nm_fabricante), ''), 'Não informado') AS fabricante,
@@ -445,8 +485,8 @@ export async function compararPeriodos(
   `),
   ]);
 
-  const novos: string[] = [];
-  const removidos: string[] = [];
+  const novosMarcas: string[] = [];
+  const removidosMarcas: string[] = [];
   const alteradas: string[] = [];
   const totalBase = (res.rows[0]?.total_base as number) ?? 0;
   for (const r of res.rows) {
@@ -454,14 +494,122 @@ export async function compararPeriodos(
     if (r.base_m && r.alvo_m) {
       alteradas.push(marcas);
     } else if (r.alvo_m) {
-      novos.push(marcas);
+      novosMarcas.push(marcas);
     } else {
-      removidos.push(marcas);
+      removidosMarcas.push(marcas);
     }
   }
-  novos.sort();
-  removidos.sort();
+  novosMarcas.sort();
+  removidosMarcas.sort();
   alteradas.sort();
+
+  // Busca modelos, tipo ICAO, operadores e proprietários para novos e removidos
+  const [modelosNovos, modelosRemovidos, opsNovos, opsRemovidos, propsNovos, propsRemovidos] = await Promise.all([
+    novosMarcas.length > 0
+      ? db
+          .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+          .from(aeronaves)
+          .where(and(inArray(aeronaves.marcas, novosMarcas), eq(aeronaves.periodo, alvo)))
+      : Promise.resolve([]),
+    removidosMarcas.length > 0
+      ? db
+          .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+          .from(aeronaves)
+          .where(and(inArray(aeronaves.marcas, removidosMarcas), eq(aeronaves.periodo, base)))
+      : Promise.resolve([]),
+    novosMarcas.length > 0
+      ? db
+          .select({ aeronaveMarcas: aeronaveOperadores.aeronaveMarcas, nome: operadores.nome })
+          .from(aeronaveOperadores)
+          .innerJoin(operadores, and(
+            eq(aeronaveOperadores.operadorDocumento, operadores.documento),
+            eq(operadores.periodo, alvo),
+          ))
+          .where(and(
+            inArray(aeronaveOperadores.aeronaveMarcas, novosMarcas),
+            eq(aeronaveOperadores.periodo, alvo),
+          ))
+      : Promise.resolve([]),
+    removidosMarcas.length > 0
+      ? db
+          .select({ aeronaveMarcas: aeronaveOperadores.aeronaveMarcas, nome: operadores.nome })
+          .from(aeronaveOperadores)
+          .innerJoin(operadores, and(
+            eq(aeronaveOperadores.operadorDocumento, operadores.documento),
+            eq(operadores.periodo, base),
+          ))
+          .where(and(
+            inArray(aeronaveOperadores.aeronaveMarcas, removidosMarcas),
+            eq(aeronaveOperadores.periodo, base),
+          ))
+      : Promise.resolve([]),
+    novosMarcas.length > 0
+      ? db
+          .select({ aeronaveMarcas: aeronaveProprietarios.aeronaveMarcas, nome: proprietarios.nome })
+          .from(aeronaveProprietarios)
+          .innerJoin(proprietarios, and(
+            eq(aeronaveProprietarios.proprietarioDocumento, proprietarios.documento),
+            eq(proprietarios.periodo, alvo),
+          ))
+          .where(and(
+            inArray(aeronaveProprietarios.aeronaveMarcas, novosMarcas),
+            eq(aeronaveProprietarios.periodo, alvo),
+          ))
+      : Promise.resolve([]),
+    removidosMarcas.length > 0
+      ? db
+          .select({ aeronaveMarcas: aeronaveProprietarios.aeronaveMarcas, nome: proprietarios.nome })
+          .from(aeronaveProprietarios)
+          .innerJoin(proprietarios, and(
+            eq(aeronaveProprietarios.proprietarioDocumento, proprietarios.documento),
+            eq(proprietarios.periodo, base),
+          ))
+          .where(and(
+            inArray(aeronaveProprietarios.aeronaveMarcas, removidosMarcas),
+            eq(aeronaveProprietarios.periodo, base),
+          ))
+      : Promise.resolve([]),
+  ]);
+  const mapaModelosNovos = new Map(modelosNovos.map((r) => [r.marcas, { modelo: r.dsModelo, tipoIcao: r.cdTipoIcao, anoFabricacao: r.nrAnoFabricacao, fabricante: r.nmFabricante }]));
+  const mapaModelosRemovidos = new Map(modelosRemovidos.map((r) => [r.marcas, { modelo: r.dsModelo, tipoIcao: r.cdTipoIcao, anoFabricacao: r.nrAnoFabricacao, fabricante: r.nmFabricante }]));
+  const mapaOpsNovos = new Map<string, string[]>();
+  for (const r of opsNovos) {
+    if (!mapaOpsNovos.has(r.aeronaveMarcas)) mapaOpsNovos.set(r.aeronaveMarcas, []);
+    mapaOpsNovos.get(r.aeronaveMarcas)!.push(r.nome);
+  }
+  const mapaOpsRemovidos = new Map<string, string[]>();
+  for (const r of opsRemovidos) {
+    if (!mapaOpsRemovidos.has(r.aeronaveMarcas)) mapaOpsRemovidos.set(r.aeronaveMarcas, []);
+    mapaOpsRemovidos.get(r.aeronaveMarcas)!.push(r.nome);
+  }
+  const mapaPropsNovos = new Map<string, string[]>();
+  for (const r of propsNovos) {
+    if (!mapaPropsNovos.has(r.aeronaveMarcas)) mapaPropsNovos.set(r.aeronaveMarcas, []);
+    mapaPropsNovos.get(r.aeronaveMarcas)!.push(r.nome);
+  }
+  const mapaPropsRemovidos = new Map<string, string[]>();
+  for (const r of propsRemovidos) {
+    if (!mapaPropsRemovidos.has(r.aeronaveMarcas)) mapaPropsRemovidos.set(r.aeronaveMarcas, []);
+    mapaPropsRemovidos.get(r.aeronaveMarcas)!.push(r.nome);
+  }
+  const novos = novosMarcas.map((m) => ({
+    marcas: m,
+    modelo: mapaModelosNovos.get(m)?.modelo ?? null,
+    tipoIcao: mapaModelosNovos.get(m)?.tipoIcao ?? null,
+    fabricante: mapaModelosNovos.get(m)?.fabricante ?? null,
+    operadores: mapaOpsNovos.get(m) ?? [],
+    proprietarios: mapaPropsNovos.get(m) ?? [],
+    anoFabricacao: mapaModelosNovos.get(m)?.anoFabricacao ?? null,
+  }));
+  const removidos = removidosMarcas.map((m) => ({
+    marcas: m,
+    modelo: mapaModelosRemovidos.get(m)?.modelo ?? null,
+    tipoIcao: mapaModelosRemovidos.get(m)?.tipoIcao ?? null,
+    fabricante: mapaModelosRemovidos.get(m)?.fabricante ?? null,
+    operadores: mapaOpsRemovidos.get(m) ?? [],
+    proprietarios: mapaPropsRemovidos.get(m) ?? [],
+    anoFabricacao: mapaModelosRemovidos.get(m)?.anoFabricacao ?? null,
+  }));
 
   let alterados: DiferencaAeronave[] = [];
   if (alteradas.length > 0) {
@@ -622,10 +770,20 @@ export async function compararPeriodos(
         vpA.get(marcas) ?? new Map(),
       );
       if (proprietariosDiff.adicionados.length || proprietariosDiff.removidos.length || proprietariosDiff.alterados.length) {
+        const partesAntes: string[] = [];
+        const partesDepois: string[] = [];
+        if (proprietariosDiff.removidos.length) partesAntes.push(`Removidos: ${proprietariosDiff.removidos.join("; ")}`);
+        if (proprietariosDiff.adicionados.length) partesDepois.push(`Adicionados: ${proprietariosDiff.adicionados.join("; ")}`);
+        if (proprietariosDiff.alterados.length) {
+          for (const alt of proprietariosDiff.alterados) {
+            partesAntes.push(alt.antes);
+            partesDepois.push(alt.depois);
+          }
+        }
         campos.push({
           campo: "Proprietários",
-          antes: proprietariosDiff.removidos.length ? `Removidos: ${proprietariosDiff.removidos.join("; ")}` : "—",
-          depois: proprietariosDiff.adicionados.length ? `Adicionados: ${proprietariosDiff.adicionados.join("; ")}` : "—",
+          antes: partesAntes.length ? partesAntes.join("; ") : "—",
+          depois: partesDepois.length ? partesDepois.join("; ") : "—",
         });
       }
       const operadoresDiff = compararVinculos(
@@ -633,14 +791,27 @@ export async function compararPeriodos(
         voA.get(marcas) ?? new Map(),
       );
       if (operadoresDiff.adicionados.length || operadoresDiff.removidos.length || operadoresDiff.alterados.length) {
+        const partesAntes: string[] = [];
+        const partesDepois: string[] = [];
+        if (operadoresDiff.removidos.length) partesAntes.push(`Removidos: ${operadoresDiff.removidos.join("; ")}`);
+        if (operadoresDiff.adicionados.length) partesDepois.push(`Adicionados: ${operadoresDiff.adicionados.join("; ")}`);
+        if (operadoresDiff.alterados.length) {
+          for (const alt of operadoresDiff.alterados) {
+            partesAntes.push(alt.antes);
+            partesDepois.push(alt.depois);
+          }
+        }
         campos.push({
           campo: "Operadores",
-          antes: operadoresDiff.removidos.length ? `Removidos: ${operadoresDiff.removidos.join("; ")}` : "—",
-          depois: operadoresDiff.adicionados.length ? `Adicionados: ${operadoresDiff.adicionados.join("; ")}` : "—",
+          antes: partesAntes.length ? partesAntes.join("; ") : "—",
+          depois: partesDepois.length ? partesDepois.join("; ") : "—",
         });
       }
       return {
         marcas,
+        modelo: b.dsModelo ?? null,
+        tipoIcao: b.cdTipoIcao ?? null,
+        anoFabricacao: b.nrAnoFabricacao ?? null,
         campos,
         proprietarios: proprietariosDiff,
         operadores: operadoresDiff,
@@ -648,18 +819,232 @@ export async function compararPeriodos(
     });
   }
 
-  const total = alterados.length;
-  const paginas = Math.max(1, Math.ceil(total / porPagina));
-  const fatia = alterados.slice((pagina - 1) * porPagina, pagina * porPagina);
+  // Aplica filtros de drill-down quando clicado nos cards de estatísticas
+  let novosFiltrados = novos;
+  let removidosFiltrados = removidos;
+  let alteradosFiltrados = alterados;
+
+  // Filtro por campo específico (ex: Status da Aeronave)
+  if (filtros.campo) {
+    alteradosFiltrados = alterados.filter((a) =>
+      a.campos.some((c) => c.campo === filtros.campo),
+    );
+  }
+
+  // Filtro por tipo (novos, removidos, alterados) — funciona com ou sem fabricante
+  if (filtros.tipo === "novos" && novos.length > 0) {
+    if (filtros.fabricante) {
+      const novosMarcasF = novos.map((n) => n.marcas);
+      const rows = await db
+        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+        .from(aeronaves)
+        .where(and(
+          inArray(aeronaves.marcas, novosMarcasF),
+          eq(aeronaves.periodo, alvo),
+          ilike(aeronaves.nmFabricante, `%${filtros.fabricante}%`),
+        ));
+      const marcasNovosF = rows.map((r) => r.marcas);
+      const opsNovosF = marcasNovosF.length > 0
+        ? db
+            .select({ aeronaveMarcas: aeronaveOperadores.aeronaveMarcas, nome: operadores.nome })
+            .from(aeronaveOperadores)
+            .innerJoin(operadores, and(eq(aeronaveOperadores.operadorDocumento, operadores.documento), eq(operadores.periodo, alvo)))
+            .where(and(inArray(aeronaveOperadores.aeronaveMarcas, marcasNovosF), eq(aeronaveOperadores.periodo, alvo)))
+        : Promise.resolve([]);
+      const opsNovosRows = await opsNovosF;
+      const mapaOpsNF = new Map<string, string[]>();
+      for (const r of opsNovosRows) {
+        if (!mapaOpsNF.has(r.aeronaveMarcas)) mapaOpsNF.set(r.aeronaveMarcas, []);
+        mapaOpsNF.get(r.aeronaveMarcas)!.push(r.nome);
+      }
+      const propsNovosF = marcasNovosF.length > 0
+        ? db
+            .select({ aeronaveMarcas: aeronaveProprietarios.aeronaveMarcas, nome: proprietarios.nome })
+            .from(aeronaveProprietarios)
+            .innerJoin(proprietarios, and(eq(aeronaveProprietarios.proprietarioDocumento, proprietarios.documento), eq(proprietarios.periodo, alvo)))
+            .where(and(inArray(aeronaveProprietarios.aeronaveMarcas, marcasNovosF), eq(aeronaveProprietarios.periodo, alvo)))
+        : Promise.resolve([]);
+      const propsNovosRows = await propsNovosF;
+      const mapaPropsNF = new Map<string, string[]>();
+      for (const r of propsNovosRows) {
+        if (!mapaPropsNF.has(r.aeronaveMarcas)) mapaPropsNF.set(r.aeronaveMarcas, []);
+        mapaPropsNF.get(r.aeronaveMarcas)!.push(r.nome);
+      }
+      novosFiltrados = rows.map((r) => ({ marcas: r.marcas, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsNF.get(r.marcas) ?? [], proprietarios: mapaPropsNF.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
+    }
+    // Esconde removidos e alterados quando visualizando apenas novos
+    removidosFiltrados = [];
+    alteradosFiltrados = [];
+  } else if (filtros.tipo === "removidos" && removidos.length > 0) {
+    if (filtros.fabricante) {
+      const removidosMarcasF = removidos.map((r) => r.marcas);
+      const rowsR = await db
+        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+        .from(aeronaves)
+        .where(and(
+          inArray(aeronaves.marcas, removidosMarcasF),
+          eq(aeronaves.periodo, base),
+          ilike(aeronaves.nmFabricante, `%${filtros.fabricante}%`),
+        ));
+      const marcasRemF = rowsR.map((r) => r.marcas);
+      const opsRemF = marcasRemF.length > 0
+        ? db
+            .select({ aeronaveMarcas: aeronaveOperadores.aeronaveMarcas, nome: operadores.nome })
+            .from(aeronaveOperadores)
+            .innerJoin(operadores, and(eq(aeronaveOperadores.operadorDocumento, operadores.documento), eq(operadores.periodo, base)))
+            .where(and(inArray(aeronaveOperadores.aeronaveMarcas, marcasRemF), eq(aeronaveOperadores.periodo, base)))
+        : Promise.resolve([]);
+      const opsRemRows = await opsRemF;
+      const mapaOpsRF = new Map<string, string[]>();
+      for (const r of opsRemRows) {
+        if (!mapaOpsRF.has(r.aeronaveMarcas)) mapaOpsRF.set(r.aeronaveMarcas, []);
+        mapaOpsRF.get(r.aeronaveMarcas)!.push(r.nome);
+      }
+      const propsRemF = marcasRemF.length > 0
+        ? db
+            .select({ aeronaveMarcas: aeronaveProprietarios.aeronaveMarcas, nome: proprietarios.nome })
+            .from(aeronaveProprietarios)
+            .innerJoin(proprietarios, and(eq(aeronaveProprietarios.proprietarioDocumento, proprietarios.documento), eq(proprietarios.periodo, base)))
+            .where(and(inArray(aeronaveProprietarios.aeronaveMarcas, marcasRemF), eq(aeronaveProprietarios.periodo, base)))
+        : Promise.resolve([]);
+      const propsRemRows = await propsRemF;
+      const mapaPropsRF = new Map<string, string[]>();
+      for (const r of propsRemRows) {
+        if (!mapaPropsRF.has(r.aeronaveMarcas)) mapaPropsRF.set(r.aeronaveMarcas, []);
+        mapaPropsRF.get(r.aeronaveMarcas)!.push(r.nome);
+      }
+      removidosFiltrados = rowsR.map((r) => ({ marcas: r.marcas, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsRF.get(r.marcas) ?? [], proprietarios: mapaPropsRF.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
+    }
+    novosFiltrados = [];
+    alteradosFiltrados = [];
+  } else if (filtros.tipo === "alterados" && !filtros.fabricante) {
+    // Tipo alterados sem fabricante — mantém a lógica original de campos
+    novosFiltrados = [];
+    removidosFiltrados = [];
+  } else if (filtros.tipo === "alterados" && filtros.fabricante) {
+    const allMarcas = alterados.map((a) => a.marcas);
+    if (allMarcas.length > 0) {
+      const rows = await db
+        .select({ marcas: aeronaves.marcas })
+        .from(aeronaves)
+        .where(and(
+          inArray(aeronaves.marcas, allMarcas),
+          eq(aeronaves.periodo, alvo),
+          ilike(aeronaves.nmFabricante, `%${filtros.fabricante}%`),
+        ));
+      const marcasFab = new Set(rows.map((r) => r.marcas));
+      alteradosFiltrados = alterados.filter((a) => marcasFab.has(a.marcas));
+    }
+    novosFiltrados = [];
+    removidosFiltrados = [];
+  }
+
+  // Filtro por fabricante sem tipo definido (mantém compatibilidade)
+  if (filtros.fabricante && !filtros.tipo) {
+    const fab = filtros.fabricante;
+    if (novos.length > 0) {
+      const novosMarcas = novos.map((n) => n.marcas);
+      const rows = await db
+        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+        .from(aeronaves)
+        .where(and(
+          inArray(aeronaves.marcas, novosMarcas),
+          eq(aeronaves.periodo, alvo),
+          ilike(aeronaves.nmFabricante, `%${fab}%`),
+        ));
+      const marcasNFab = rows.map((r) => r.marcas);
+      const opsNFab = marcasNFab.length > 0
+        ? db
+            .select({ aeronaveMarcas: aeronaveOperadores.aeronaveMarcas, nome: operadores.nome })
+            .from(aeronaveOperadores)
+            .innerJoin(operadores, and(eq(aeronaveOperadores.operadorDocumento, operadores.documento), eq(operadores.periodo, alvo)))
+            .where(and(inArray(aeronaveOperadores.aeronaveMarcas, marcasNFab), eq(aeronaveOperadores.periodo, alvo)))
+        : Promise.resolve([]);
+      const opsNFabRows = await opsNFab;
+      const mapaOpsNFab = new Map<string, string[]>();
+      for (const r of opsNFabRows) {
+        if (!mapaOpsNFab.has(r.aeronaveMarcas)) mapaOpsNFab.set(r.aeronaveMarcas, []);
+        mapaOpsNFab.get(r.aeronaveMarcas)!.push(r.nome);
+      }
+      const propsNFab = marcasNFab.length > 0
+        ? db
+            .select({ aeronaveMarcas: aeronaveProprietarios.aeronaveMarcas, nome: proprietarios.nome })
+            .from(aeronaveProprietarios)
+            .innerJoin(proprietarios, and(eq(aeronaveProprietarios.proprietarioDocumento, proprietarios.documento), eq(proprietarios.periodo, alvo)))
+            .where(and(inArray(aeronaveProprietarios.aeronaveMarcas, marcasNFab), eq(aeronaveProprietarios.periodo, alvo)))
+        : Promise.resolve([]);
+      const propsNFabRows = await propsNFab;
+      const mapaPropsNFab = new Map<string, string[]>();
+      for (const r of propsNFabRows) {
+        if (!mapaPropsNFab.has(r.aeronaveMarcas)) mapaPropsNFab.set(r.aeronaveMarcas, []);
+        mapaPropsNFab.get(r.aeronaveMarcas)!.push(r.nome);
+      }
+      novosFiltrados = rows.map((r) => ({ marcas: r.marcas, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsNFab.get(r.marcas) ?? [], proprietarios: mapaPropsNFab.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
+    }
+    if (removidos.length > 0) {
+      const removidosMarcas = removidos.map((r) => r.marcas);
+      const rowsR = await db
+        .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
+        .from(aeronaves)
+        .where(and(
+          inArray(aeronaves.marcas, removidosMarcas),
+          eq(aeronaves.periodo, base),
+          ilike(aeronaves.nmFabricante, `%${fab}%`),
+        ));
+      const marcasRFab = rowsR.map((r) => r.marcas);
+      const opsRFab = marcasRFab.length > 0
+        ? db
+            .select({ aeronaveMarcas: aeronaveOperadores.aeronaveMarcas, nome: operadores.nome })
+            .from(aeronaveOperadores)
+            .innerJoin(operadores, and(eq(aeronaveOperadores.operadorDocumento, operadores.documento), eq(operadores.periodo, base)))
+            .where(and(inArray(aeronaveOperadores.aeronaveMarcas, marcasRFab), eq(aeronaveOperadores.periodo, base)))
+        : Promise.resolve([]);
+      const opsRFabRows = await opsRFab;
+      const mapaOpsRFab = new Map<string, string[]>();
+      for (const r of opsRFabRows) {
+        if (!mapaOpsRFab.has(r.aeronaveMarcas)) mapaOpsRFab.set(r.aeronaveMarcas, []);
+        mapaOpsRFab.get(r.aeronaveMarcas)!.push(r.nome);
+      }
+      const propsRFab = marcasRFab.length > 0
+        ? db
+            .select({ aeronaveMarcas: aeronaveProprietarios.aeronaveMarcas, nome: proprietarios.nome })
+            .from(aeronaveProprietarios)
+            .innerJoin(proprietarios, and(eq(aeronaveProprietarios.proprietarioDocumento, proprietarios.documento), eq(proprietarios.periodo, base)))
+            .where(and(inArray(aeronaveProprietarios.aeronaveMarcas, marcasRFab), eq(aeronaveProprietarios.periodo, base)))
+        : Promise.resolve([]);
+      const propsRFabRows = await propsRFab;
+      const mapaPropsRFab = new Map<string, string[]>();
+      for (const r of propsRFabRows) {
+        if (!mapaPropsRFab.has(r.aeronaveMarcas)) mapaPropsRFab.set(r.aeronaveMarcas, []);
+        mapaPropsRFab.get(r.aeronaveMarcas)!.push(r.nome);
+      }
+      removidosFiltrados = rowsR.map((r) => ({ marcas: r.marcas, modelo: r.dsModelo ?? null, tipoIcao: r.cdTipoIcao ?? null, fabricante: r.nmFabricante ?? null, operadores: mapaOpsRFab.get(r.marcas) ?? [], proprietarios: mapaPropsRFab.get(r.marcas) ?? [], anoFabricacao: r.nrAnoFabricacao ?? null }));
+    }
+  }
+
+  const total = alteradosFiltrados.length;
+  const paginas = filtros.tipo ? 1 : Math.max(1, Math.ceil(total / porPagina));
+  const fatia = filtros.tipo ? alteradosFiltrados : alteradosFiltrados.slice((pagina - 1) * porPagina, pagina * porPagina);
 
   const contagemCampos = new Map<string, number>();
+  const valoresCampos = new Map<string, Map<string, number>>();
   for (const a of alterados) {
     for (const c of a.campos) {
       contagemCampos.set(c.campo, (contagemCampos.get(c.campo) ?? 0) + 1);
+      if (!valoresCampos.has(c.campo)) valoresCampos.set(c.campo, new Map());
+      const vMap = valoresCampos.get(c.campo)!;
+      vMap.set(c.antes, (vMap.get(c.antes) ?? 0) + 1);
     }
   }
   const camposMaisAlterados = [...contagemCampos.entries()]
-    .map(([rotulo, quantidade]) => ({ rotulo, quantidade }))
+    .map(([rotulo, quantidade]) => {
+      const vMap = valoresCampos.get(rotulo);
+      let valorMaisComum = "";
+      if (vMap && vMap.size > 0) {
+        valorMaisComum = [...vMap.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      }
+      return { rotulo, quantidade, valorMaisComum };
+    })
     .sort((x, y) => y.quantidade - x.quantidade)
     .slice(0, 8);
 
@@ -686,8 +1071,8 @@ export async function compararPeriodos(
       novosPorFabricante,
       removidosPorFabricante,
     },
-    novos,
-    removidos,
+    novos: novosFiltrados,
+    removidos: removidosFiltrados,
     alterados: fatia,
     pagina,
     paginas,
