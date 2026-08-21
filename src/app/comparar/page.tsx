@@ -24,7 +24,6 @@ import {
   listarPeriodos,
 } from "@/app/actions/comparar";
 import { AutoImprimir } from "@/components/auto-imprimir";
-import { NavigationLoader } from "@/components/navigation-loader";
 import { FormComparar } from "@/components/form-comparar";
 
 export const metadata = {
@@ -96,33 +95,16 @@ export default async function CompararPage({
   }>;
 }) {
   const params = await searchParams;
-  const periodos = await listarPeriodos();
 
-  const base = params.base && periodos.includes(params.base) ? params.base : undefined;
-  const alvo = params.alvo && periodos.includes(params.alvo) ? params.alvo : undefined;
-  const pagina = Math.max(1, Number(params.pagina ?? 1) || 1);
   const imprimir = params.imprimir === "1";
   const abrirRelatorio = params.relatorio === "1" && !imprimir;
 
-  const matricula =
-    params.matricula && /^[a-zA-Z0-9-]+$/.test(params.matricula)
-      ? params.matricula.trim().toUpperCase()
-      : undefined;
-  const pb = params.pb && periodos.includes(params.pb) ? params.pb : undefined;
-  const pa = params.pa && periodos.includes(params.pa) ? params.pa : undefined;
-  const resultadoMatricula =
-    matricula && pb && pa && !imprimir
-      ? await compararMatricula(matricula, pb, pa)
-      : null;
-
-  const temComparacao = base && alvo;
   const campoFiltro = params.campo || undefined;
   const fabricanteFiltro = params.fabricante || undefined;
   const tipoFiltro = params.tipo === "novos" || params.tipo === "removidos" || params.tipo === "alterados" ? params.tipo : undefined;
   const tipoLabelMap: Record<string, string> = { novos: "Novos", removidos: "Removidos", alterados: "Alterados" };
   const temFiltroDrillDown = !!(campoFiltro || fabricanteFiltro || tipoFiltro);
 
-  // Filtros de aeronave (aplicam-se a ambos os períodos)
   const aeroFiltros = {
     modelo: params.modelo || undefined,
     situacao: params.situacao || undefined,
@@ -138,30 +120,57 @@ export default async function CompararPage({
   };
   const temFiltrosAero = Object.values(aeroFiltros).some(Boolean);
 
-  // Quando relatorio=1, busca TODOS os registros filtrados (sem paginação)
-  const resultadoRelatorio =
+  const periodoBase = params.base && /^\d{4}-\d{2}$/.test(params.base) ? params.base : undefined;
+  const periodoAlvo = params.alvo && /^\d{4}-\d{2}$/.test(params.alvo) ? params.alvo : undefined;
+
+  // Pré-busca: listarPeriodos + compararPeriodos BASE em paralelo
+  // Sempre busca compararPeriodos (sem filtros) se base/alvo válidos
+  const [periodos, resultadoBase] = await Promise.all([
+    listarPeriodos(),
+    periodoBase && periodoAlvo && !imprimir
+      ? compararPeriodos(periodoBase, periodoAlvo, 1, 50, {})
+      : Promise.resolve(null),
+  ]);
+
+  const base = periodoBase && periodos.includes(periodoBase) ? periodoBase : undefined;
+  const alvo = periodoAlvo && periodos.includes(periodoAlvo) ? periodoAlvo : undefined;
+  const temComparacao = base && alvo;
+
+  const matricula =
+    params.matricula && /^[a-zA-Z0-9-]+$/.test(params.matricula)
+      ? params.matricula.trim().toUpperCase()
+      : undefined;
+  const pb = params.pb && periodos.includes(params.pb) ? params.pb : undefined;
+  const pa = params.pa && periodos.includes(params.pa) ? params.pa : undefined;
+  const resultadoMatricula =
+    matricula && pb && pa && !imprimir
+      ? await compararMatricula(matricula, pb, pa)
+      : null;
+
+  // Reusa resultadoBase se não há filtros, senão busca com filtros
+  const [resultadoRelatorio, resultado] = await Promise.all([
     abrirRelatorio && base && alvo && temFiltroDrillDown
-      ? await compararPeriodos(base, alvo, 1, 1000000, {
+      ? compararPeriodos(base, alvo, 1, 1000000, {
           campo: campoFiltro,
           fabricante: fabricanteFiltro,
           tipo: tipoFiltro,
           ...aeroFiltros,
         })
-      : null;
-
-  const resultado =
-    base && alvo
-      ? await compararPeriodos(base, alvo, imprimir ? 1 : pagina, imprimir ? 1000000 : 50, {
-          campo: !abrirRelatorio ? campoFiltro : undefined,
-          fabricante: !abrirRelatorio ? fabricanteFiltro : undefined,
-          tipo: !abrirRelatorio ? tipoFiltro : undefined,
-          ...aeroFiltros,
-        })
-      : null;
+      : Promise.resolve(null),
+    resultadoBase && !temFiltroDrillDown
+      ? resultadoBase
+      : base && alvo
+        ? compararPeriodos(base, alvo, imprimir ? 1 : 1, imprimir ? 1000000 : 50, {
+            campo: !abrirRelatorio ? campoFiltro : undefined,
+            fabricante: !abrirRelatorio ? fabricanteFiltro : undefined,
+            tipo: !abrirRelatorio ? tipoFiltro : undefined,
+            ...aeroFiltros,
+          })
+        : Promise.resolve(null),
+  ]);
 
   return (
     <AppShell>
-      <NavigationLoader />
       {imprimir && resultado ? <AutoImprimir /> : null}
       <div className="flex flex-col gap-4">
         {!imprimir ? (
@@ -201,7 +210,7 @@ export default async function CompararPage({
             <form method="GET" action="/comparar" className="flex flex-col gap-3">
               <input type="hidden" name="base" value={String(params.base ?? "")} />
               <input type="hidden" name="alvo" value={String(params.alvo ?? "")} />
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <label className="flex flex-col gap-1.5 text-sm font-medium">
                   Fabricante
                   <input
@@ -354,7 +363,7 @@ export default async function CompararPage({
                     <option value="PUBLICO DISTRITO FEDERAL">PUBLICO DISTRITO FEDERAL</option>
                   </select>
                 </label>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <label className="flex flex-col gap-1.5 text-sm font-medium">
                     Ano de fabricação de
                     <input
@@ -577,7 +586,7 @@ export default async function CompararPage({
               ) : null}
             </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <CardResumo
                 tipo="novos"
                 icone="plus"
@@ -927,7 +936,8 @@ export default async function CompararPage({
               {resultadoRelatorio.novos.length === 0 ? (
                 <p className="text-sm text-zinc-500">Nenhum registro encontrado.</p>
               ) : (
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto -mx-4 sm:mx-0">
+                  <table className="w-full min-w-[640px] text-sm">
                   <thead>
                     <tr className="border-b border-zinc-200 dark:border-zinc-700">
                       <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Matrícula</th>
@@ -952,7 +962,8 @@ export default async function CompararPage({
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                  </table>
+                </div>
               )}
             </div>
           ) : tipoFiltro === "removidos" ? (
@@ -963,7 +974,8 @@ export default async function CompararPage({
               {resultadoRelatorio.removidos.length === 0 ? (
                 <p className="text-sm text-zinc-500">Nenhum registro encontrado.</p>
               ) : (
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto -mx-4 sm:mx-0">
+                  <table className="w-full min-w-[640px] text-sm">
                   <thead>
                     <tr className="border-b border-zinc-200 dark:border-zinc-700">
                       <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">Matrícula</th>
@@ -989,7 +1001,8 @@ export default async function CompararPage({
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                  </table>
+                </div>
               )}
             </div>
           ) : (
@@ -1011,10 +1024,10 @@ export default async function CompararPage({
                       </div>
                       <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
                         {d.campos.map((c) => (
-                          <div key={c.campo} className="grid grid-cols-3 gap-2 px-4 py-2 text-sm">
+                          <div key={c.campo} className="flex flex-col gap-1 px-4 py-2 text-sm sm:grid sm:grid-cols-3 sm:gap-2">
                             <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">{c.campo}</span>
-                            <span className="text-red-500 line-through decoration-red-400/60">{decodificarValor(c.campo, c.antes)}</span>
-                            <span className="font-medium text-emerald-600 dark:text-emerald-400">{decodificarValor(c.campo, c.depois)}</span>
+                            <span className="truncate text-red-500 line-through decoration-red-400/60">{decodificarValor(c.campo, c.antes)}</span>
+                            <span className="truncate font-medium text-emerald-600 dark:text-emerald-400">{decodificarValor(c.campo, c.depois)}</span>
                           </div>
                         ))}
                       </div>

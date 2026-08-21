@@ -67,7 +67,7 @@ export function CardNovo({ r }: { r: NovoDetalhado }) {
           <div className="flex items-center gap-2 bg-emerald-500 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-white">
             <span className="h-2 w-2 rounded-full bg-white animate-pulse" /> Ficha completa — {cdInterdicao === "R" ? "7 campos preenchidos pela ANAC para Reserva" : "informações novas destacadas em verde"}
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-0 divide-y divide-emerald-100 dark:divide-emerald-900 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-x-4 gap-y-0 divide-y divide-emerald-100 dark:divide-emerald-900 sm:grid-cols-2 lg:grid-cols-3">
             {campos
               .filter((c) => {
                 const temValor = !!c.valor && c.valor !== "—";

@@ -75,6 +75,17 @@ Fonte: [ANAC — Registro Aeronáutico Brasileiro](https://www.gov.br/anac/pt-br
 - **Hash materializado** (`hash` md5) com índice `btree (periodo, hash)` para comparação mensal de 34k linhas em ~90ms (vs 350ms)
 - **Cache de comparações** (`comparacoes_cache` + memória 5min) para resposta ~5ms em cliques repetidos
 - **Card expansível** para `Registros novos` com ficha completa destacada em verde e `Reserva` filtrada
+- **Região Vercel `gru1` (São Paulo)** `vercel.json:2` para latência <30ms até `Neon sa-east-1` (vs 150ms `iad1`)
+- **Fetch paralelo** `src/app/comparar/page.tsx:141` `Promise.all([resultadoRelatorio, resultado])` para não somar 2x 90ms
+
+## Layout mobile (notas para futuras alterações)
+
+- **Filtros** `src/app/comparar/page.tsx:204` `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` - empilha em 1 coluna no celular para evitar scroll horizontal
+- **Resumo** `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` - 1 coluna em telas <640px
+- **Cards novos** `src/components/card-novo.tsx:67` `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` - ficha com 7 campos para `Reserva` (oculta `—`) evita scroll
+- **Tabelas do modal** `overflow-x-auto -mx-4 sm:mx-0 min-w-[640px]` - scroll horizontal com margem negativa no mobile, sem quebrar layout
+- **Barras** `src/components/barra-comparacao.tsx:1` e `card-resumo` com relógio `00:00.000` dentro do próprio card para feedback imediato
+- **Evitar scroll:** empilhar dados em `flex flex-col` no mobile (`sm:grid`) e usar `truncate` em `marcas/modelo` longos
 
 ## Nota sobre o CSV
 
