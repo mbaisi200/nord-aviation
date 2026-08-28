@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { Badge, Card, Input } from "@/components/ui";
 import { FiltrosAeronaves } from "@/components/filtros-aeronaves";
-import { buscarAeronaves, type FiltrosAeronaves as Filtros } from "@/app/actions/aeronaves";
+import { buscarAeronaves, listarFabricantes, listarModelos, listarUfsProprietarios, listarUfsOperadores, type FiltrosAeronaves as Filtros } from "@/app/actions/aeronaves";
 import { situacaoCor, situacaoLabel } from "@/lib/aeronave";
 import { formatarData } from "@/lib/format";
 
@@ -14,7 +14,7 @@ export const metadata = {
 
 export const dynamic = "force-dynamic";
 
-const CAMPOS_FILTRO = [
+const CAMPOS_FILTRO_ARRAY = [
   "situacao",
   "fabricante",
   "modelo",
@@ -25,17 +25,28 @@ const CAMPOS_FILTRO = [
   "cfOperacional",
   "categoria",
   "tpOperacao",
-  "anoDe",
-  "anoAte",
-  "proprietario",
-  "operador",
+  "ufProprietario",
+  "ufOperador",
 ] as const;
+
+const CAMPOS_FILTRO_TEXTO = ["anoDe", "anoAte", "proprietario", "operador"] as const;
+
+const CAMPOS_FILTRO = [...CAMPOS_FILTRO_ARRAY, ...CAMPOS_FILTRO_TEXTO] as const;
 
 function extrairFiltros(
   params: Record<string, string | string[] | undefined>,
 ): Filtros {
   const filtros: Filtros = {};
-  for (const campo of CAMPOS_FILTRO) {
+  for (const campo of CAMPOS_FILTRO_ARRAY) {
+    const valor = params[campo];
+    if (Array.isArray(valor)) {
+      const arr = valor.map((v) => v.trim()).filter(Boolean);
+      if (arr.length > 0) filtros[campo] = arr;
+    } else if (typeof valor === "string" && valor.trim() !== "") {
+      filtros[campo] = [valor.trim()];
+    }
+  }
+  for (const campo of CAMPOS_FILTRO_TEXTO) {
     const valor = params[campo];
     if (typeof valor === "string" && valor.trim() !== "") {
       filtros[campo] = valor.trim();
@@ -52,13 +63,20 @@ export default async function ListaAeronavesPage({
   const params = await searchParams;
   const termo = params.q ?? "";
   const pagina = Math.max(1, Number(params.pagina) || 1);
+  const ordenacao = typeof params.ordenacao === "string" ? params.ordenacao : "matricula_desc";
   const filtros = extrairFiltros(params);
-  const temFiltros = CAMPOS_FILTRO.some((c) => filtros[c]);
-  const { registros, total, paginas } = await buscarAeronaves(
-    termo,
-    pagina,
-    filtros,
-  );
+  filtros.ordenacao = ordenacao;
+  const temFiltros = [
+    ...CAMPOS_FILTRO_ARRAY.map((c) => (filtros[c]?.length ?? 0) > 0),
+    ...CAMPOS_FILTRO_TEXTO.map((c) => !!filtros[c]),
+  ].some(Boolean);
+  const [{ registros, total, paginas }, fabricantes, modelos, ufsProps, ufsOps] = await Promise.all([
+    buscarAeronaves(termo, pagina, filtros),
+    listarFabricantes(),
+    listarModelos(),
+    listarUfsProprietarios(),
+    listarUfsOperadores(),
+  ]);
 
   return (
     <AppShell>
@@ -88,7 +106,7 @@ export default async function ListaAeronavesPage({
           ) : null}
         </form>
 
-        <details className="group overflow-hidden rounded-2xl border border-sky-200/70 bg-gradient-to-br from-sky-50/90 via-white to-indigo-50/70 shadow-sm transition-shadow group-open:shadow-md group-open:ring-2 group-open:ring-sky-500/25 dark:border-sky-800/50 dark:from-sky-950/40 dark:via-zinc-900 dark:to-indigo-950/40" open={temFiltros}>
+        <details className="group rounded-2xl border border-sky-200/70 bg-gradient-to-br from-sky-50/90 via-white to-indigo-50/70 shadow-sm transition-shadow group-open:shadow-md group-open:ring-2 group-open:ring-sky-500/25 dark:border-sky-800/50 dark:from-sky-950/40 dark:via-zinc-900 dark:to-indigo-950/40" open={temFiltros}>
           <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3.5 text-sm font-semibold text-zinc-700 transition-colors hover:bg-sky-50/60 dark:text-zinc-300 dark:hover:bg-sky-950/40">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-indigo-600 text-white shadow-md shadow-sky-600/30">
               <SlidersHorizontal
@@ -100,8 +118,14 @@ export default async function ListaAeronavesPage({
             </span>
             {temFiltros ? (
               <span className="ml-auto rounded-full bg-gradient-to-r from-sky-600 to-indigo-600 px-2.5 py-0.5 text-xs font-bold text-white shadow-sm shadow-sky-600/30">
-                {CAMPOS_FILTRO.filter((c) => filtros[c]).length} ativo
-                {CAMPOS_FILTRO.filter((c) => filtros[c]).length === 1 ? "" : "s"}
+                {[
+                  ...CAMPOS_FILTRO_ARRAY.map((c) => (filtros[c]?.length ?? 0) > 0),
+                  ...CAMPOS_FILTRO_TEXTO.map((c) => !!filtros[c]),
+                ].filter(Boolean).length} ativo
+                {[
+                  ...CAMPOS_FILTRO_ARRAY.map((c) => (filtros[c]?.length ?? 0) > 0),
+                  ...CAMPOS_FILTRO_TEXTO.map((c) => !!filtros[c]),
+                ].filter(Boolean).length === 1 ? "" : "s"}
               </span>
             ) : (
               <span className="ml-auto text-xs font-normal text-zinc-400 dark:text-zinc-500">
@@ -111,7 +135,7 @@ export default async function ListaAeronavesPage({
             <ChevronDown className="h-4 w-4 text-zinc-400 transition-transform group-open:rotate-180" />
           </summary>
           <div className="px-4 pb-4">
-            <FiltrosAeronaves valores={filtros} ativos={temFiltros} />
+            <FiltrosAeronaves valores={filtros} ativos={temFiltros} fabricantes={fabricantes} modelos={modelos} ufsProprietarios={ufsProps} ufsOperadores={ufsOps} termoBusca={termo} />
           </div>
         </details>
 

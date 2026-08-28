@@ -3,7 +3,6 @@ import {
   ArrowLeftRight,
   ArrowRight,
   FileSpreadsheet,
-  GitCompare,
   Printer,
   Search,
   SlidersHorizontal,
@@ -23,8 +22,9 @@ import {
   compararPeriodos,
   listarPeriodos,
 } from "@/app/actions/comparar";
+import { listarFabricantes, listarModelos } from "@/app/actions/aeronaves";
 import { AutoImprimir } from "@/components/auto-imprimir";
-import { FormComparar } from "@/components/form-comparar";
+import { FiltrosComparar } from "@/components/filtros-comparar";
 
 export const metadata = {
   title: "Comparar períodos do RAB",
@@ -96,40 +96,99 @@ export default async function CompararPage({
 }) {
   const params = await searchParams;
 
+  function extrairArray(valor: string | string[] | undefined): string[] | undefined {
+    if (Array.isArray(valor)) {
+      const arr = valor.map((v) => v.trim()).filter(Boolean);
+      return arr.length > 0 ? arr : undefined;
+    }
+    if (typeof valor === "string" && valor.trim()) return [valor.trim()];
+    return undefined;
+  }
+
+  const CAMPOS_FILTRO_URL = [
+    "fabricante", "modelo", "situacao", "tpMotor", "qtMotor",
+    "tpPouso", "tpCa", "cfOperacional", "categoria", "tpOperacao",
+    "anoDe", "anoAte",
+  ] as const;
+
+  function filtrosAtivosEntries(): [string, string][] {
+    const entries: [string, string][] = [];
+    for (const c of CAMPOS_FILTRO_URL) {
+      const v = params[c];
+      if (Array.isArray(v)) {
+        for (const item of v) {
+          if (item.trim()) entries.push([c, item.trim()]);
+        }
+      } else if (typeof v === "string" && v.trim()) {
+        entries.push([c, v.trim()]);
+      }
+    }
+    return entries;
+  }
+
+  function hrefComparar(extras: Record<string, string | string[]> = {}): string {
+    const base_ = base ?? params.base ?? "";
+    const alvo_ = alvo ?? params.alvo ?? "";
+    const q = new URLSearchParams();
+    if (base_) q.set("base", base_);
+    if (alvo_) q.set("alvo", alvo_);
+    // Primeiro: filtros de aeronave
+    for (const [k, v] of filtrosAtivosEntries()) {
+      q.append(k, v);
+    }
+    // Depois: extras — se a key já existe, remove antes de adicionar o novo valor
+    for (const [k, v] of Object.entries(extras)) {
+      if (v) {
+        q.delete(k);
+        if (Array.isArray(v)) {
+          for (const item of v) q.append(k, item);
+        } else {
+          q.set(k, v);
+        }
+      }
+    }
+    const qs = q.toString();
+    return `/comparar${qs ? `?${qs}` : ""}`;
+  }
+
   const imprimir = params.imprimir === "1";
   const abrirRelatorio = params.relatorio === "1" && !imprimir;
 
   const campoFiltro = params.campo || undefined;
-  const fabricanteFiltro = params.fabricante || undefined;
   const tipoFiltro = params.tipo === "novos" || params.tipo === "removidos" || params.tipo === "alterados" ? params.tipo : undefined;
   const tipoLabelMap: Record<string, string> = { novos: "Novos", removidos: "Removidos", alterados: "Alterados" };
+  // fabricanteFiltro: só quando é drill-down (tipo/campo presentes) E fabricante é string única (não array de filtros)
+  const fabricanteFiltro = (tipoFiltro || campoFiltro) && typeof params.fabricante === "string" ? params.fabricante : undefined;
   const temFiltroDrillDown = !!(campoFiltro || fabricanteFiltro || tipoFiltro);
 
   const aeroFiltros = {
-    modelo: params.modelo || undefined,
-    situacao: params.situacao || undefined,
-    tpMotor: params.tpMotor || undefined,
-    qtMotor: params.qtMotor || undefined,
-    tpPouso: params.tpPouso || undefined,
-    tpCa: params.tpCa || undefined,
-    cfOperacional: params.cfOperacional || undefined,
-    categoria: params.categoria || undefined,
-    tpOperacao: params.tpOperacao || undefined,
+    fabricante: extrairArray(params.fabricante),
+    modelo: extrairArray(params.modelo),
+    situacao: extrairArray(params.situacao),
+    tpMotor: extrairArray(params.tpMotor),
+    qtMotor: extrairArray(params.qtMotor),
+    tpPouso: extrairArray(params.tpPouso),
+    tpCa: extrairArray(params.tpCa),
+    cfOperacional: extrairArray(params.cfOperacional),
+    categoria: extrairArray(params.categoria),
+    tpOperacao: extrairArray(params.tpOperacao),
     anoDe: params.anoDe || undefined,
     anoAte: params.anoAte || undefined,
   };
-  const temFiltrosAero = Object.values(aeroFiltros).some(Boolean);
+  const temFiltrosAero = Object.values(aeroFiltros).some((v) => Array.isArray(v) ? v.length > 0 : !!v);
 
   const periodoBase = params.base && /^\d{4}-\d{2}$/.test(params.base) ? params.base : undefined;
   const periodoAlvo = params.alvo && /^\d{4}-\d{2}$/.test(params.alvo) ? params.alvo : undefined;
 
   // Pré-busca: listarPeriodos + compararPeriodos BASE em paralelo
   // Sempre busca compararPeriodos (sem filtros) se base/alvo válidos
-  const [periodos, resultadoBase] = await Promise.all([
+  const [periodos, resultadoBase, fabricantes, modelos] = await Promise.all([
     listarPeriodos(),
     periodoBase && periodoAlvo && !imprimir
       ? compararPeriodos(periodoBase, periodoAlvo, 1, 50, {})
       : Promise.resolve(null),
+    listarFabricantes(),
+    listarModelos(),
   ]);
 
   const base = periodoBase && periodos.includes(periodoBase) ? periodoBase : undefined;
@@ -147,25 +206,23 @@ export default async function CompararPage({
       ? await compararMatricula(matricula, pb, pa)
       : null;
 
-  // Reusa resultadoBase se não há filtros, senão busca com filtros
+  // drillDownFab: array single para drill-down por fabricante (quando tipo/campo presentes)
+  const drillDownFab = fabricanteFiltro ? [fabricanteFiltro] : undefined;
+
+  // Merge dos filtros: quando há drill-down, fabricante do drill-down substitui o filtro de fabricante
+  const filtrosMergeados = {
+    ...aeroFiltros,
+    ...(temFiltroDrillDown ? { fabricante: drillDownFab ?? aeroFiltros.fabricante, campo: campoFiltro, tipo: tipoFiltro } : {}),
+  } satisfies import("@/app/actions/comparar").FiltrosComparacao;
+
   const [resultadoRelatorio, resultado] = await Promise.all([
     abrirRelatorio && base && alvo && temFiltroDrillDown
-      ? compararPeriodos(base, alvo, 1, 1000000, {
-          campo: campoFiltro,
-          fabricante: fabricanteFiltro,
-          tipo: tipoFiltro,
-          ...aeroFiltros,
-        })
+      ? compararPeriodos(base, alvo, 1, 1000000, filtrosMergeados)
       : Promise.resolve(null),
-    resultadoBase && !temFiltroDrillDown
+    resultadoBase && !temFiltrosAero && !temFiltroDrillDown
       ? resultadoBase
       : base && alvo
-        ? compararPeriodos(base, alvo, imprimir ? 1 : 1, imprimir ? 1000000 : 50, {
-            campo: !abrirRelatorio ? campoFiltro : undefined,
-            fabricante: !abrirRelatorio ? fabricanteFiltro : undefined,
-            tipo: !abrirRelatorio ? tipoFiltro : undefined,
-            ...aeroFiltros,
-          })
+        ? compararPeriodos(base, alvo, imprimir ? 1 : 1, imprimir ? 1000000 : 50, filtrosMergeados)
         : Promise.resolve(null),
   ]);
 
@@ -185,216 +242,17 @@ export default async function CompararPage({
           </div>
         ) : null}
 
+        {/* Filtros de aeronave + períodos */}
         {!imprimir ? (
           <Card className="p-4">
-            <FormComparar periodos={periodos} base={base} alvo={alvo} />
-          </Card>
-        ) : null}
-
-        {/* Filtros de aeronave */}
-        {!imprimir ? (
-          <Card className="p-4">
-            <div className="mb-3 flex items-center gap-2">
-              <SlidersHorizontal className="h-4 w-4 text-zinc-400" />
-              <span className="text-sm font-semibold">Filtros de aeronave</span>
-              {temFiltrosAero ? (
-                <Link
-                  href={`/comparar?base=${params.base ?? ""}&alvo=${params.alvo ?? ""}`}
-                  className="ml-auto inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-100 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
-                >
-                  <X className="h-3 w-3" />
-                  Limpar filtros
-                </Link>
-              ) : null}
-            </div>
-            <form method="GET" action="/comparar" className="flex flex-col gap-3">
-              <input type="hidden" name="base" value={String(params.base ?? "")} />
-              <input type="hidden" name="alvo" value={String(params.alvo ?? "")} />
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Fabricante
-                  <input
-                    name="fabricante"
-                    defaultValue={fabricanteFiltro ?? ""}
-                    placeholder="Ex.: EMBRAER"
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Modelo
-                  <input
-                    name="modelo"
-                    defaultValue={params.modelo ?? ""}
-                    placeholder="Ex.: EMB 190"
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  />
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Situação
-                  <select
-                    name="situacao"
-                    defaultValue={params.situacao ?? ""}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value="">Todas</option>
-                    <option value="N">Situação normal</option>
-                    <option value="R">Reserva de marcas</option>
-                    <option value="S">CA suspenso</option>
-                    <option value="C">CA cancelado</option>
-                    <option value="V">CA vencido</option>
-                    <option value="X">Aeronave interditada</option>
-                    <option value="U">Ultraleve (normal)</option>
-                    <option value="Z">Experimental (normal)</option>
-                    <option value="P">Situação punitiva</option>
-                    <option value="M">Matrícula cancelada</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Tipo de motor
-                  <select
-                    name="tpMotor"
-                    defaultValue={params.tpMotor ?? ""}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value="">Todos</option>
-                    <option value="MOTOR A PISTÃO">MOTOR A PISTÃO</option>
-                    <option value="MOTOR CONVENCIONAL">MOTOR CONVENCIONAL</option>
-                    <option value="MOTOR TURBOHELICE">MOTOR TURBOHELICE</option>
-                    <option value="MOTOR JATO/TURBOFAN">MOTOR JATO/TURBOFAN</option>
-                    <option value="MOTOR TURBOEIXO">MOTOR TURBOEIXO</option>
-                    <option value="MOTOR ELETRICO">MOTOR ELETRICO</option>
-                    <option value="SEM MOTOR">SEM MOTOR</option>
-                    <option value="DRONE">DRONE</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Qtde. de motores
-                  <select
-                    name="qtMotor"
-                    defaultValue={params.qtMotor ?? ""}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value="">Todas</option>
-                    <option value="0">0</option>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                    <option value="4">4</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Tipo de pouso
-                  <select
-                    name="tpPouso"
-                    defaultValue={params.tpPouso ?? ""}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value="">Todos</option>
-                    <option value="POUSO CONVENCIONAL">POUSO CONVENCIONAL</option>
-                    <option value="HELICOPTERO">HELICOPTERO</option>
-                    <option value="ANFIBIO">ANFIBIO</option>
-                    <option value="GIROCOPTERO">GIROCOPTERO</option>
-                    <option value="POUSO EM TERRA">POUSO EM TERRA</option>
-                    <option value="POUSO NA AGUA">POUSO NA AGUA</option>
-                    <option value="DRONE (RPAS)">DRONE (RPAS)</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Tipo de CA
-                  <select
-                    name="tpCa"
-                    defaultValue={params.tpCa ?? ""}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value="">Todos</option>
-                    <option value="CA PADRAO">CA PADRAO</option>
-                    <option value="CAVE">CAVE</option>
-                    <option value="AEV">AEV</option>
-                    <option value="CEALE">CEALE</option>
-                    <option value="APO">APO</option>
-                    <option value="CAER">CAER</option>
-                    <option value="APO+CAVE">APO+CAVE</option>
-                    <option value="CAARF">CAARF</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  CF operacional
-                  <select
-                    name="cfOperacional"
-                    defaultValue={params.cfOperacional ?? ""}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value="">Todos</option>
-                    <option value="RBAC 91">RBAC 91</option>
-                    <option value="RBAC 135">RBAC 135</option>
-                    <option value="RBAC 121">RBAC 121</option>
-                    <option value="RBAC E94">RBAC E94</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Categoria de homologação
-                  <select
-                    name="categoria"
-                    defaultValue={params.categoria ?? ""}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value="">Todas</option>
-                    <option value="NORMAL">NORMAL</option>
-                    <option value="TRANSPORTE">TRANSPORTE</option>
-                    <option value="RESTRITA">RESTRITA</option>
-                    <option value="UTILIDADE">UTILIDADE</option>
-                    <option value="RPAS AUTORIZADO">RPAS AUTORIZADO</option>
-                  </select>
-                </label>
-                <label className="flex flex-col gap-1.5 text-sm font-medium">
-                  Tipo de operação
-                  <select
-                    name="tpOperacao"
-                    defaultValue={params.tpOperacao ?? ""}
-                    className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                  >
-                    <option value="">Todos</option>
-                    <option value="PRIVADO">PRIVADO</option>
-                    <option value="PRIVADA">PRIVADA</option>
-                    <option value="PUBLICO">PUBLICO</option>
-                    <option value="PUBLICO ESTADUAL">PUBLICO ESTADUAL</option>
-                    <option value="PUBLICO FEDERAL">PUBLICO FEDERAL</option>
-                    <option value="PUBLICO MUNICIPAL">PUBLICO MUNICIPAL</option>
-                    <option value="PUBLICO DISTRITO FEDERAL">PUBLICO DISTRITO FEDERAL</option>
-                  </select>
-                </label>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <label className="flex flex-col gap-1.5 text-sm font-medium">
-                    Ano de fabricação de
-                    <input
-                      name="anoDe"
-                      type="number"
-                      min={1900}
-                      max={2100}
-                      defaultValue={params.anoDe ?? ""}
-                      placeholder="Ex.: 2000"
-                      className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1.5 text-sm font-medium">
-                    até
-                    <input
-                      name="anoAte"
-                      type="number"
-                      min={1900}
-                      max={2100}
-                      defaultValue={params.anoAte ?? ""}
-                      placeholder="Ex.: 2020"
-                      className="h-10 rounded-xl border border-zinc-300 bg-white px-3 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-                    />
-                  </label>
-                </div>
-              </div>
-              <Button type="submit">
-                <SlidersHorizontal className="h-4 w-4" />
-                Aplicar filtros
-              </Button>
-            </form>
+            <FiltrosComparar
+              periodos={periodos}
+              base={base}
+              alvo={alvo}
+              valores={aeroFiltros}
+              fabricantes={fabricantes}
+              modelos={modelos}
+            />
           </Card>
         ) : null}
 
@@ -560,7 +418,7 @@ export default async function CompararPage({
                   <>
                     <span className="text-zinc-300 dark:text-zinc-600">·</span>
                     <VerTodosButton
-                      href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}`}
+                      href={hrefComparar()}
                       label={campoFiltro ? campoFiltro : fabricanteFiltro ? fabricanteFiltro : tipoLabelMap[tipoFiltro ?? ""]}
                     />
                   </>
@@ -569,7 +427,7 @@ export default async function CompararPage({
               {!imprimir ? (
                 <div className="flex gap-2 print:hidden">
                   <LinkButton
-                    href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&imprimir=1`}
+                    href={hrefComparar({ imprimir: "1" })}
                     variant="secondary"
                   >
                     <Printer className="h-4 w-4" />
@@ -593,7 +451,7 @@ export default async function CompararPage({
                 cor="text-emerald-500"
                 rotulo="novos"
                 quantidade={resultado.resumo.novos}
-                href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&tipo=novos`}
+                href={hrefComparar({ relatorio: "1", tipo: "novos" })}
               />
               <CardResumo
                 tipo="removidos"
@@ -601,7 +459,7 @@ export default async function CompararPage({
                 cor="text-red-500"
                 rotulo="removidos"
                 quantidade={resultado.resumo.removidos}
-                href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&tipo=removidos`}
+                href={hrefComparar({ relatorio: "1", tipo: "removidos" })}
               />
               <CardResumo
                 tipo="alterados"
@@ -609,7 +467,7 @@ export default async function CompararPage({
                 cor="text-amber-500"
                 rotulo="alterados"
                 quantidade={resultado.resumo.alterados}
-                href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&tipo=alterados`}
+                href={hrefComparar({ relatorio: "1", tipo: "alterados" })}
               />
               <CardResumo
                 tipo="sem"
@@ -695,7 +553,7 @@ export default async function CompararPage({
                           quantidade={c.quantidade}
                           maximo={resultado.estatisticas.camposMaisAlterados[0].quantidade}
                           cor="bg-amber-400"
-                          href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&campo=${encodeURIComponent(c.rotulo)}`}
+                          href={hrefComparar({ relatorio: "1", campo: c.rotulo })}
                         />
                       ))}
                     </div>
@@ -718,7 +576,7 @@ export default async function CompararPage({
                           quantidade={f.quantidade}
                           maximo={resultado.estatisticas.novosPorFabricante[0].quantidade}
                           cor="bg-emerald-500"
-                          href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&fabricante=${encodeURIComponent(f.fabricante)}&tipo=novos`}
+                          href={hrefComparar({ relatorio: "1", fabricante: f.fabricante, tipo: "novos" })}
                         />
                       ))}
                     </div>
@@ -743,7 +601,7 @@ export default async function CompararPage({
                           quantidade={f.quantidade}
                           maximo={resultado.estatisticas.removidosPorFabricante[0].quantidade}
                           cor="bg-red-500"
-                          href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&relatorio=1&fabricante=${encodeURIComponent(f.fabricante)}&tipo=removidos`}
+                          href={hrefComparar({ relatorio: "1", fabricante: f.fabricante, tipo: "removidos" })}
                         />
                       ))}
                     </div>
@@ -859,7 +717,7 @@ export default async function CompararPage({
                     (p) => (
                       <Link
                         key={p}
-                        href={`/comparar?base=${resultado.base}&alvo=${resultado.alvo}&pagina=${p}`}
+                        href={hrefComparar({ pagina: String(p) })}
                         className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-sm font-medium ${
                           p === resultado.pagina
                             ? "bg-gradient-to-r from-sky-600 to-indigo-600 text-white shadow-md shadow-sky-600/25"
@@ -890,6 +748,7 @@ export default async function CompararPage({
           subtitulo={`${formatarPeriodo(base)} → ${formatarPeriodo(alvo)}`}
           base={base}
           alvo={alvo}
+          hrefVoltar={hrefComparar()}
         >
           {/* Relatório de campo específico */}
           {campoFiltro ? (

@@ -9,19 +9,21 @@ export function ModalRelatorio({
   subtitulo,
   base,
   alvo,
+  hrefVoltar,
   children,
 }: {
   titulo: string;
   subtitulo: string;
   base: string;
   alvo: string;
+  hrefVoltar?: string;
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const contentRef = useRef<HTMLDivElement>(null);
 
   const fechar = () => {
-    router.push(`/comparar?base=${base}&alvo=${alvo}`);
+    router.push(hrefVoltar || `/comparar?base=${base}&alvo=${alvo}`);
   };
 
   const exportarPdf = () => {

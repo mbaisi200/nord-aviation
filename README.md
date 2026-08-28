@@ -47,7 +47,7 @@ src/
     actions/              # Server Actions (aeronaves, comparar, importar)
     api/exportar/         # exportação XLS
     manifest.ts           # manifest PWA
-  components/             # UI (AppShell, formulário, cards, badges, card-novo expansível, navigation-loader)
+  components/             # UI (AppShell, formulário, cards, badges, card-novo expansível, filtros multi-select)
   db/schema.ts            # modelo de dados (Drizzle)
   lib/                    # validação zod, icao-types (tradução C172 → Cessna 172), formatação
 scripts/import-rab.ts     # importador do CSV do RAB (ANAC)
@@ -69,23 +69,36 @@ data/                     # CSV baixado (gitignored)
 
 Fonte: [ANAC — Registro Aeronáutico Brasileiro](https://www.gov.br/anac/pt-br/acesso-a-informacao/dados-abertos/areas-de-atuacao/aeronaves-1/registro-aeronautico-brasileiro) (atualização mensal). A ANAC não oferece API REST pública; o sistema baixa o CSV oficial e sincroniza no Neon.
 
+## Funcionalidades
+
+### Consulta de Aeronaves
+- **Filtros multi-select** com busca por texto e checkboxes para: Fabricante, Modelo, Situação, Tipo de motor, Qtde. de motores, Tipo de pouso, Tipo de CA, CF operacional, Categoria de homologação, Tipo de operação, UF do proprietário, UF do operador
+- **Ordenação** por data de matrícula, prefixo, modelo, fabricante, ano de fabricação
+- **Exportação XLS** (SpreadsheetML 2003) e **PDF** (HTML estilizado com impressão do navegador)
+- Colunas de exportação: Prefixo, Modelo, Situação (descrição), Proprietário, UF Proprietário, Operador, UF Operador
+
+### Comparação de Períodos
+- **Filtros multi-select** idênticos à consulta de aeronaves, com persistência via localStorage
+- **Comparação automática** ao selecionar períodos ou aplicar filtros
+- **Cards interativos** com drill-down para detalhes (novos, removidos, alterados por campo/fabricante)
+- **Exportação XLS e PDF** da comparação filtrada
+- **Comparar matrícula específica** entre dois períodos
+
 ## Otimizações recentes
 
 - **Nome popular ICAO persistido** (`ds_tipo_icao_nome`) com índice `GIN pg_trgm` para busca por `Cessna 172 Skyhawk` em ~3ms
 - **Hash materializado** (`hash` md5) com índice `btree (periodo, hash)` para comparação mensal de 34k linhas em ~90ms (vs 350ms)
 - **Cache de comparações** (`comparacoes_cache` + memória 5min) para resposta ~5ms em cliques repetidos
-- **Card expansível** para `Registros novos` com ficha completa destacada em verde e `Reserva` filtrada
-- **Região Vercel `gru1` (São Paulo)** `vercel.json:2` para latência <30ms até `Neon sa-east-1` (vs 150ms `iad1`)
-- **Fetch paralelo** `src/app/comparar/page.tsx:141` `Promise.all([resultadoRelatorio, resultado])` para não somar 2x 90ms
+- **Fetch paralelo** `Promise.all` para não somar latências de queries independentes
+- **Região Vercel `gru1` (São Paulo)** `vercel.json` para latência <30ms até `Neon sa-east-1`
 
-## Layout mobile (notas para futuras alterações)
+## Layout mobile
 
-- **Filtros** `src/app/comparar/page.tsx:204` `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` - empilha em 1 coluna no celular para evitar scroll horizontal
-- **Resumo** `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` - 1 coluna em telas <640px
-- **Cards novos** `src/components/card-novo.tsx:67` `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` - ficha com 7 campos para `Reserva` (oculta `—`) evita scroll
-- **Tabelas do modal** `overflow-x-auto -mx-4 sm:mx-0 min-w-[640px]` - scroll horizontal com margem negativa no mobile, sem quebrar layout
-- **Barras** `src/components/barra-comparacao.tsx:1` e `card-resumo` com relógio `00:00.000` dentro do próprio card para feedback imediato
-- **Evitar scroll:** empilhar dados em `flex flex-col` no mobile (`sm:grid`) e usar `truncate` em `marcas/modelo` longos
+- **Filtros** `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` — empilha em 1 coluna no celular
+- **Resumo** `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` — 1 coluna em telas <640px
+- **Cards novos** `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` — ficha com campos para reserva
+- **Tabelas do modal** `overflow-x-auto` — scroll horizontal no mobile
+- **Evitar scroll:** empilhar dados em `flex flex-col` no mobile (`sm:grid`) e usar `truncate` em texto longo
 
 ## Nota sobre o CSV
 

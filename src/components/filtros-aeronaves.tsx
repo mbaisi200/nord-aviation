@@ -1,7 +1,12 @@
-import { SlidersHorizontal, X } from "lucide-react";
+"use client";
+
+import { SlidersHorizontal, X, FileSpreadsheet, FileText, ArrowUpDown } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import { Field, Input, Select } from "@/components/ui";
 import type { FiltrosAeronaves } from "@/app/actions/aeronaves";
+import { MultiSelectFiltro } from "@/components/multi-select-filtro";
+import { exportarXls, exportarPdf } from "@/app/actions/aeronaves";
 
 const OPCOES_SITUACAO = [
   { v: "N", r: "Situação normal" },
@@ -93,109 +98,151 @@ const OPCOES_TP_OPERACAO = [
   "PUBLICO",
 ];
 
-function SelectFiltro({
-  nome,
-  rotulo,
-  valor,
-  opcoes,
-}: {
-  nome: keyof FiltrosAeronaves;
-  rotulo: string;
-  valor: string | undefined;
-  opcoes: { v: string; r: string }[] | string[];
-}) {
-  return (
-    <Field label={rotulo} htmlFor={`f-${nome}`}>
-      <Select id={`f-${nome}`} name={nome} defaultValue={valor ?? ""}>
-        <option value="">Todos</option>
-        {opcoes.map((o) => {
-          const v = typeof o === "string" ? o : o.v;
-          const r = typeof o === "string" ? o : o.r;
-          return (
-            <option key={v} value={v}>
-              {r}
-            </option>
-          );
-        })}
-      </Select>
-    </Field>
-  );
+const OPCOES_ORDENACAO = [
+  { v: "matricula_desc", r: "Data de matrícula (recente primeiro)" },
+  { v: "matricula_asc", r: "Data de matrícula (antigo primeiro)" },
+  { v: "marcas_asc", r: "Prefixo (A → Z)" },
+  { v: "marcas_desc", r: "Prefixo (Z → A)" },
+  { v: "modelo_asc", r: "Modelo (A → Z)" },
+  { v: "modelo_desc", r: "Modelo (Z → A)" },
+  { v: "fabricante_asc", r: "Fabricante (A → Z)" },
+  { v: "fabricante_desc", r: "Fabricante (Z → A)" },
+  { v: "ano_desc", r: "Ano de fabricação (recente primeiro)" },
+  { v: "ano_asc", r: "Ano de fabricação (antigo primeiro)" },
+];
+
+function filtrosParaExport(valores: FiltrosAeronaves) {
+  return {
+    situacao: valores.situacao,
+    fabricante: valores.fabricante,
+    modelo: valores.modelo,
+    tpMotor: valores.tpMotor,
+    qtMotor: valores.qtMotor,
+    tpPouso: valores.tpPouso,
+    tpCa: valores.tpCa,
+    cfOperacional: valores.cfOperacional,
+    categoria: valores.categoria,
+    tpOperacao: valores.tpOperacao,
+    anoDe: valores.anoDe,
+    anoAte: valores.anoAte,
+    proprietario: valores.proprietario,
+    operador: valores.operador,
+    ufProprietario: valores.ufProprietario,
+    ufOperador: valores.ufOperador,
+  };
 }
 
 export function FiltrosAeronaves({
   valores,
   ativos,
+  fabricantes,
+  modelos,
+  ufsProprietarios,
+  ufsOperadores,
+  termoBusca,
 }: {
   valores: FiltrosAeronaves;
   ativos: boolean;
+  fabricantes?: string[];
+  modelos?: string[];
+  ufsProprietarios?: string[];
+  ufsOperadores?: string[];
+  termoBusca?: string;
 }) {
+  const [exportando, setExportando] = useState<"xls" | "pdf" | null>(null);
+
+  async function handleExportXls() {
+    setExportando("xls");
+    try {
+      const { xml } = await exportarXls(termoBusca ?? "", filtrosParaExport(valores));
+      const blob = new Blob([xml], { type: "application/vnd.ms-excel" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `aeronaves_${new Date().toISOString().slice(0, 10)}.xls`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportando(null);
+    }
+  }
+
+  async function handleExportPdf() {
+    setExportando("pdf");
+    try {
+      const { html } = await exportarPdf(termoBusca ?? "", filtrosParaExport(valores));
+      const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } finally {
+      setExportando(null);
+    }
+  }
+
   return (
     <CardFiltros ativos={ativos}>
       <form action="/aeronaves" className="flex flex-col gap-3">
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Fabricante" htmlFor="f-fabricante">
-            <Input
-              id="f-fabricante"
-              name="fabricante"
-              defaultValue={valores.fabricante}
-              placeholder="Ex.: CIRRUS"
-            />
-          </Field>
-          <Field label="Modelo" htmlFor="f-modelo">
-            <Input
-              id="f-modelo"
-              name="modelo"
-              defaultValue={valores.modelo}
-              placeholder="Ex.: SR22"
-            />
-          </Field>
-          <SelectFiltro
+          <MultiSelectFiltro
+            nome="fabricante"
+            rotulo="Fabricante"
+            opcoes={fabricantes ?? []}
+            selecionados={valores.fabricante}
+          />
+          <MultiSelectFiltro
+            nome="modelo"
+            rotulo="Modelo"
+            opcoes={modelos ?? []}
+            selecionados={valores.modelo}
+          />
+          <MultiSelectFiltro
             nome="situacao"
             rotulo="Situação"
-            valor={valores.situacao}
             opcoes={OPCOES_SITUACAO}
+            selecionados={valores.situacao}
           />
-          <SelectFiltro
+          <MultiSelectFiltro
             nome="tpMotor"
             rotulo="Tipo de motor"
-            valor={valores.tpMotor}
             opcoes={OPCOES_TP_MOTOR}
+            selecionados={valores.tpMotor}
           />
-          <SelectFiltro
+          <MultiSelectFiltro
             nome="qtMotor"
             rotulo="Qtde. de motores"
-            valor={valores.qtMotor}
             opcoes={OPCOES_QT_MOTOR}
+            selecionados={valores.qtMotor}
           />
-          <SelectFiltro
+          <MultiSelectFiltro
             nome="tpPouso"
             rotulo="Tipo de pouso"
-            valor={valores.tpPouso}
             opcoes={OPCOES_TP_POUSO}
+            selecionados={valores.tpPouso}
           />
-          <SelectFiltro
+          <MultiSelectFiltro
             nome="tpCa"
             rotulo="Tipo de CA"
-            valor={valores.tpCa}
             opcoes={OPCOES_TP_CA}
+            selecionados={valores.tpCa}
           />
-          <SelectFiltro
+          <MultiSelectFiltro
             nome="cfOperacional"
             rotulo="CF operacional"
-            valor={valores.cfOperacional}
             opcoes={OPCOES_CF_OPERACIONAL}
+            selecionados={valores.cfOperacional}
           />
-          <SelectFiltro
+          <MultiSelectFiltro
             nome="categoria"
             rotulo="Categoria de homologação"
-            valor={valores.categoria}
             opcoes={OPCOES_CATEGORIA}
+            selecionados={valores.categoria}
           />
-          <SelectFiltro
+          <MultiSelectFiltro
             nome="tpOperacao"
             rotulo="Tipo de operação"
-            valor={valores.tpOperacao}
             opcoes={OPCOES_TP_OPERACAO}
+            selecionados={valores.tpOperacao}
           />
           <div className="grid grid-cols-2 gap-2">
             <Field label="Ano de fabricação de" htmlFor="f-anoDe">
@@ -229,6 +276,12 @@ export function FiltrosAeronaves({
               placeholder="Nome do proprietário"
             />
           </Field>
+          <MultiSelectFiltro
+            nome="ufProprietario"
+            rotulo="UF Proprietário"
+            opcoes={ufsProprietarios ?? []}
+            selecionados={valores.ufProprietario}
+          />
           <Field label="Operador" htmlFor="f-operador">
             <Input
               id="f-operador"
@@ -237,13 +290,59 @@ export function FiltrosAeronaves({
               placeholder="Nome do operador"
             />
           </Field>
+          <MultiSelectFiltro
+            nome="ufOperador"
+            rotulo="UF Operador"
+            opcoes={ufsOperadores ?? []}
+            selecionados={valores.ufOperador}
+          />
         </div>
-        <button
-          type="submit"
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 px-4 text-[15px] font-semibold text-white shadow-md shadow-sky-600/25 transition-all hover:from-sky-700 hover:to-indigo-700 hover:shadow-lg hover:shadow-sky-600/30"
-        >
-          Aplicar filtros
-        </button>
+
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="w-full sm:w-64">
+            <Field label="Ordenar por" htmlFor="f-ordenacao">
+              <Select
+                id="f-ordenacao"
+                name="ordenacao"
+                defaultValue={valores.ordenacao ?? "matricula_desc"}
+              >
+                {OPCOES_ORDENACAO.map((o) => (
+                  <option key={o.v} value={o.v}>
+                    {o.r}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportXls}
+            disabled={exportando !== null}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-[15px] font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 hover:shadow-md disabled:pointer-events-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            {exportando === "xls" ? "Exportando..." : "Exportar XLS"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={exportando !== null}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-[15px] font-medium text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 hover:shadow-md disabled:pointer-events-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <FileText className="h-4 w-4" />
+            {exportando === "pdf" ? "Exportando..." : "Exportar PDF"}
+          </button>
+
+          <button
+            type="submit"
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 px-4 text-[15px] font-semibold text-white shadow-md shadow-sky-600/25 transition-all hover:from-sky-700 hover:to-indigo-700 hover:shadow-lg hover:shadow-sky-600/30 sm:ml-auto"
+          >
+            <ArrowUpDown className="h-4 w-4" />
+            Aplicar filtros
+          </button>
+        </div>
       </form>
     </CardFiltros>
   );

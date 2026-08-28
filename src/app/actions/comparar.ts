@@ -424,18 +424,18 @@ export async function compararMatricula(
 
 export type FiltrosComparacao = {
   campo?: string;
-  fabricante?: string;
+  fabricante?: string[];
   tipo?: "novos" | "removidos" | "alterados";
   // Filtros de aeronave (aplicam-se a ambos os períodos)
-  modelo?: string;
-  situacao?: string;
-  tpMotor?: string;
-  qtMotor?: string;
-  tpPouso?: string;
-  tpCa?: string;
-  cfOperacional?: string;
-  categoria?: string;
-  tpOperacao?: string;
+  modelo?: string[];
+  situacao?: string[];
+  tpMotor?: string[];
+  qtMotor?: string[];
+  tpPouso?: string[];
+  tpCa?: string[];
+  cfOperacional?: string[];
+  categoria?: string[];
+  tpOperacao?: string[];
   anoDe?: string;
   anoAte?: string;
 };
@@ -507,15 +507,46 @@ export async function compararPeriodos(
   // Monta cláusulas WHERE para filtros de aeronave
   const buildFilterWhere = (f: FiltrosComparacao) => {
     const p: string[] = [];
-    if (f.situacao) p.push(`AND left(coalesce(cd_interdicao, ''), 1) = '${f.situacao.replace(/'/g, "''")}'`);
-    if (f.modelo) p.push(`AND ds_modelo ILIKE '%${f.modelo.replace(/'/g, "''")}%'`);
-    if (f.tpMotor) p.push(`AND tp_motor = '${f.tpMotor.replace(/'/g, "''")}'`);
-    if (f.qtMotor) p.push(`AND qt_motor = ${Number(f.qtMotor)}`);
-    if (f.tpPouso) p.push(`AND tp_pouso = '${f.tpPouso.replace(/'/g, "''")}'`);
-    if (f.tpCa) p.push(`AND tp_ca = '${f.tpCa.replace(/'/g, "''")}'`);
-    if (f.cfOperacional) p.push(`AND cf_operacional = '${f.cfOperacional.replace(/'/g, "''")}'`);
-    if (f.categoria) p.push(`AND ds_categoria_homologacao = '${f.categoria.replace(/'/g, "''")}'`);
-    if (f.tpOperacao) p.push(`AND tp_operacao = '${f.tpOperacao.replace(/'/g, "''")}'`);
+    if (f.fabricante?.length) {
+      const vals = f.fabricante.map((v) => `nm_fabricante ILIKE '%${v.replace(/'/g, "''")}%'`);
+      p.push(`AND (${vals.join(' OR ')})`);
+    }
+    if (f.situacao?.length) {
+      const vals = f.situacao.map((v) => `left(coalesce(cd_interdicao, ''), 1) = '${v.replace(/'/g, "''")}'`);
+      p.push(`AND (${vals.join(' OR ')})`);
+    }
+    if (f.modelo?.length) {
+      const vals = f.modelo.map((v) => `ds_modelo ILIKE '%${v.replace(/'/g, "''")}%'`);
+      p.push(`AND (${vals.join(' OR ')})`);
+    }
+    if (f.tpMotor?.length) {
+      const vals = f.tpMotor.map((v) => `'${v.replace(/'/g, "''")}'`);
+      p.push(`AND tp_motor IN (${vals.join(', ')})`);
+    }
+    if (f.qtMotor?.length) {
+      const vals = f.qtMotor.map((v) => Number(v));
+      p.push(`AND qt_motor IN (${vals.join(', ')})`);
+    }
+    if (f.tpPouso?.length) {
+      const vals = f.tpPouso.map((v) => `'${v.replace(/'/g, "''")}'`);
+      p.push(`AND tp_pouso IN (${vals.join(', ')})`);
+    }
+    if (f.tpCa?.length) {
+      const vals = f.tpCa.map((v) => `'${v.replace(/'/g, "''")}'`);
+      p.push(`AND tp_ca IN (${vals.join(', ')})`);
+    }
+    if (f.cfOperacional?.length) {
+      const vals = f.cfOperacional.map((v) => `'${v.replace(/'/g, "''")}'`);
+      p.push(`AND cf_operacional IN (${vals.join(', ')})`);
+    }
+    if (f.categoria?.length) {
+      const vals = f.categoria.map((v) => `'${v.replace(/'/g, "''")}'`);
+      p.push(`AND ds_categoria_homologacao IN (${vals.join(', ')})`);
+    }
+    if (f.tpOperacao?.length) {
+      const vals = f.tpOperacao.map((v) => `'${v.replace(/'/g, "''")}'`);
+      p.push(`AND tp_operacao IN (${vals.join(', ')})`);
+    }
     if (f.anoDe) p.push(`AND nr_ano_fabricacao >= ${Number(f.anoDe)}`);
     if (f.anoAte) p.push(`AND nr_ano_fabricacao <= ${Number(f.anoAte)}`);
     return p.join(" ");
@@ -737,7 +768,7 @@ export async function compararPeriodos(
   // busca apenas as marcas onde a coluna correspondente realmente mudou,
   // evitando fetch de 1500+ registros e comparações em memória.
   let alteradasParaBuscar = alteradas;
-  if (filtros.campo && !filtros.fabricante && alteradas.length > 0) {
+  if (filtros.campo && !filtros.fabricante?.length && alteradas.length > 0) {
     const campoInfo = CAMPOS.find((c) => c.rotulo === filtros.campo);
     if (campoInfo) {
       try {
@@ -768,7 +799,7 @@ export async function compararPeriodos(
   // Paginação antes do fetch para não buscar 1500+ registros quando só 50 são exibidos
   // Só pagina quando não há filtros que precisam do conjunto completo (fabricante/campo já tratado)
   const totalParaBuscar = alteradasParaBuscar.length;
-  const precisaConjuntoCompleto = !!(filtros.fabricante || filtros.tipo);
+  const precisaConjuntoCompleto = !!(filtros.fabricante?.length || filtros.tipo);
   const paginasCalc = precisaConjuntoCompleto ? 1 : Math.max(1, Math.ceil(totalParaBuscar / porPagina));
   const paginaCalc = Math.min(Math.max(1, pagina), paginasCalc);
   const alteradasPagina = precisaConjuntoCompleto
@@ -1045,7 +1076,7 @@ export async function compararPeriodos(
 
   // Filtro por tipo (novos, removidos, alterados) — funciona com ou sem fabricante
   if (filtros.tipo === "novos" && novos.length > 0) {
-    if (filtros.fabricante) {
+    if (filtros.fabricante?.length) {
       const novosMarcasF = novos.map((n) => n.marcas);
       const rows = await db
         .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, dsTipoIcaoNome: aeronaves.dsTipoIcaoNome, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
@@ -1053,7 +1084,7 @@ export async function compararPeriodos(
         .where(and(
           inArray(aeronaves.marcas, novosMarcasF),
           eq(aeronaves.periodo, alvo),
-          ilike(aeronaves.nmFabricante, `%${filtros.fabricante}%`),
+          or(...(filtros.fabricante ?? []).map(f => ilike(aeronaves.nmFabricante, `%${f}%`))),
         ));
       const marcasNovosF = rows.map((r) => r.marcas);
       const opsNovosF = marcasNovosF.length > 0
@@ -1089,7 +1120,7 @@ export async function compararPeriodos(
     removidosFiltrados = [];
     alteradosFiltrados = [];
   } else if (filtros.tipo === "removidos" && removidos.length > 0) {
-    if (filtros.fabricante) {
+    if (filtros.fabricante?.length) {
       const removidosMarcasF = removidos.map((r) => r.marcas);
       const rowsR = await db
         .select({ marcas: aeronaves.marcas, dsModelo: aeronaves.dsModelo, cdTipoIcao: aeronaves.cdTipoIcao, dsTipoIcaoNome: aeronaves.dsTipoIcaoNome, nrAnoFabricacao: aeronaves.nrAnoFabricacao, nmFabricante: aeronaves.nmFabricante })
@@ -1097,7 +1128,7 @@ export async function compararPeriodos(
         .where(and(
           inArray(aeronaves.marcas, removidosMarcasF),
           eq(aeronaves.periodo, base),
-          ilike(aeronaves.nmFabricante, `%${filtros.fabricante}%`),
+          or(...(filtros.fabricante ?? []).map(f => ilike(aeronaves.nmFabricante, `%${f}%`))),
         ));
       const marcasRemF = rowsR.map((r) => r.marcas);
       const opsRemF = marcasRemF.length > 0
@@ -1131,11 +1162,11 @@ export async function compararPeriodos(
     }
     novosFiltrados = [];
     alteradosFiltrados = [];
-  } else if (filtros.tipo === "alterados" && !filtros.fabricante) {
+  } else if (filtros.tipo === "alterados" && !filtros.fabricante?.length) {
     // Tipo alterados sem fabricante — mantém a lógica original de campos
     novosFiltrados = [];
     removidosFiltrados = [];
-  } else if (filtros.tipo === "alterados" && filtros.fabricante) {
+  } else if (filtros.tipo === "alterados" && filtros.fabricante?.length) {
     const allMarcas = alterados.map((a) => a.marcas);
     if (allMarcas.length > 0) {
       const rows = await db
@@ -1144,7 +1175,7 @@ export async function compararPeriodos(
         .where(and(
           inArray(aeronaves.marcas, allMarcas),
           eq(aeronaves.periodo, alvo),
-          ilike(aeronaves.nmFabricante, `%${filtros.fabricante}%`),
+          or(...(filtros.fabricante ?? []).map(f => ilike(aeronaves.nmFabricante, `%${f}%`))),
         ));
       const marcasFab = new Set(rows.map((r) => r.marcas));
       alteradosFiltrados = alterados.filter((a) => marcasFab.has(a.marcas));
@@ -1154,8 +1185,8 @@ export async function compararPeriodos(
   }
 
   // Filtro por fabricante sem tipo definido (mantém compatibilidade)
-  if (filtros.fabricante && !filtros.tipo) {
-    const fab = filtros.fabricante;
+  if (filtros.fabricante?.length && !filtros.tipo) {
+    const fabs = filtros.fabricante;
     if (novos.length > 0) {
       const novosMarcas = novos.map((n) => n.marcas);
       const rows = await db
@@ -1164,7 +1195,7 @@ export async function compararPeriodos(
         .where(and(
           inArray(aeronaves.marcas, novosMarcas),
           eq(aeronaves.periodo, alvo),
-          ilike(aeronaves.nmFabricante, `%${fab}%`),
+          or(...fabs.map(f => ilike(aeronaves.nmFabricante, `%${f}%`))),
         ));
       const marcasNFab = rows.map((r) => r.marcas);
       const opsNFab = marcasNFab.length > 0
@@ -1204,7 +1235,7 @@ export async function compararPeriodos(
         .where(and(
           inArray(aeronaves.marcas, removidosMarcas),
           eq(aeronaves.periodo, base),
-          ilike(aeronaves.nmFabricante, `%${fab}%`),
+          or(...fabs.map(f => ilike(aeronaves.nmFabricante, `%${f}%`))),
         ));
       const marcasRFab = rowsR.map((r) => r.marcas);
       const opsRFab = marcasRFab.length > 0
